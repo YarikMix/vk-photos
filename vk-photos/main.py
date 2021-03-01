@@ -194,8 +194,6 @@ class GroupsPhotoDownloader:
 
             offset += 100
 
-            write_json(posts)
-
         return self.photos
 
     def filter_posts(self, posts):
