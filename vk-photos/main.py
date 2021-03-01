@@ -16,7 +16,7 @@ BASE_DIR = Path(__file__).resolve().parent
 PHOTOS_DIR = BASE_DIR.joinpath("Фотки")
 CONFIG_PATH = BASE_DIR.joinpath("config.yaml")
 
-with open(CONFIG_PATH ) as ymlFile:
+with open(CONFIG_PATH) as ymlFile:
     config = yaml.load(ymlFile.read(), Loader=yaml.Loader)
 
 def auth_handler(remember_device=None):
@@ -177,35 +177,60 @@ class GroupsPhotoDownloader:
         self.group_id=group_id
 
     def get_photos(self):
-        photos = []
-        for offset in range(3):
+        self.photos = []
+
+        offset = 0
+        while True:
             posts = vk.wall.get(
                 owner_id=self.group_id,
                 count=100,
                 offset=offset
             )["items"]
 
-            for post in posts:
-                if self.check_post(post):
-                    photo_data = self.get_single_photo_data(post)
-                    if photo_data != None:
-                        photos.append(photo_data)
+            self.filter_posts(posts)
 
-        return photos
+            if len(posts) < 100:
+                break
 
-    def check_post(self, post):
-        is_add = post["marked_as_ads"]
-        if not is_add:
-            if "attachments" in post:
-                if "copy_history" in post:
-                    post_type = post["copy_history"][0]["attachments"][0]["type"]
-                    attachments_count = len(post["copy_history"][0]["attachments"])
-                else:
-                    post_type = post["attachments"][0]["type"]
-                    attachments_count = len(post["attachments"])
-                if post_type == "photo" and attachments_count == 1:
-                    return True
-            return False
+            offset += 100
+
+            write_json(posts)
+
+        return self.photos
+
+    def filter_posts(self, posts):
+        for post in posts:
+
+            # Пропускаем посты с рекламой
+            if post["marked_as_ads"]:
+                continue
+
+            if "copy_history" in post:
+                if "attachments" in post["copy_history"][0]:
+                    # Проходимся по всем вложениям поста
+                    for i, attachment in enumerate(post["copy_history"][0]["attachments"]):
+                        # Отбираем только картинки
+                        if attachment["type"] == "photo":
+                            photo_id = post["copy_history"][0]["attachments"][i]["photo"]["id"]
+                            photo_url = post["copy_history"][0]["attachments"][i]["photo"]["sizes"][-1]["url"]
+
+                            self.photos.append({
+                                "id": photo_id,
+                                "url": photo_url
+                            })
+            elif "attachments" in post:
+                # Проходимся по всем вложениям поста
+                for i, attachment in enumerate(post["attachments"]):
+                    # Отбираем только картинки
+                    if attachment["type"] == "photo":
+                        photo_id = post["attachments"][i]["photo"]["id"]
+                        photo_url = post["attachments"][i]["photo"]["sizes"][-1]["url"]
+
+                        self.photos.append({
+                            "id": photo_id,
+                            "url": photo_url
+                        })
+
 
     def get_single_photo_data(self, post):
         try:
@@ -229,12 +254,11 @@ class GroupsPhotoDownloader:
     def download_photos(self, photos):
         """Скачиваем все фото из переданного списка"""
 
-        # Number of parallel threads
         self.lock = threading.Semaphore(4)
 
-        # List of threads objects I so we can handle them later
         thread_pool = []
 
+        self.total_count = 0  # Количество скаченных фото
         pbar = tqdm(total=len(photos))
 
         for photo in photos:
@@ -242,7 +266,6 @@ class GroupsPhotoDownloader:
             thread_pool.append(thread)
             thread.start()
 
-            # Add one to our lock, so we will wait if needed.
             self.lock.acquire()
 
             pbar.update(1)
@@ -263,6 +286,7 @@ class GroupsPhotoDownloader:
             r = requests.get(photo_url)
             with open(file_path, "wb") as f:
                 f.write(r.content)
+                self.total_count += 1
 
         self.lock.release()
 
@@ -272,7 +296,7 @@ class GroupsPhotoDownloader:
             group_id=abs(self.group_id)
         )
 
-        self.group_name = data[0]["name"].replace("/", " ").replace("|", " ")
+        self.group_name = data[0]["name"].replace("/", " ").replace("|", " ").strip()
         self.is_closed = data[0]["is_closed"]
 
     def main(self):
@@ -289,6 +313,7 @@ class GroupsPhotoDownloader:
                 print(f"Создаём папку с фотографиями группы '{self.group_name}'")
                 self.group_photos_path.mkdir()
 
+            print("Получаем фотографии группы")
             photos = self.get_photos()  # Получаем фотографии со стены группы
             print("{} {} {}".format(
                 numeral.choose_plural(len(photos), "Будет, Будут, Будут"),
@@ -296,14 +321,15 @@ class GroupsPhotoDownloader:
                 numeral.get_plural(len(photos), "фотография, фотографии, фотографий")
             ))
 
+            print("Начинаем скачивать фотографии")
             time_start = time.time()
             self.download_photos(photos)  # Скачиваем фотографии
 
             time_finish = time.time()
             download_time = round(time_finish - time_start)
             print("{} {} за {}".format(
-                numeral.choose_plural(len(photos), "Скачена, Скачены, Скачены"),
-                numeral.get_plural(len(photos), "фотография, фотографии, фотографий"),
+                numeral.choose_plural(self.total_count, "Скачена, Скачены, Скачены"),
+                numeral.get_plural(self.total_count, "фотография, фотографии, фотографий"),
                 numeral.get_plural(download_time, "секунду, секунды, секунд")
             ))
 
