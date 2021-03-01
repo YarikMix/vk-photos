@@ -1,5 +1,7 @@
 # -*- coding: utf-8 -*-
+import random
 import time
+import string
 import threading
 from pathlib import Path
 
@@ -209,45 +211,15 @@ class GroupsPhotoDownloader:
                     for i, attachment in enumerate(post["copy_history"][0]["attachments"]):
                         # Отбираем только картинки
                         if attachment["type"] == "photo":
-                            photo_id = post["copy_history"][0]["attachments"][i]["photo"]["id"]
                             photo_url = post["copy_history"][0]["attachments"][i]["photo"]["sizes"][-1]["url"]
-
-                            self.photos.append({
-                                "id": photo_id,
-                                "url": photo_url
-                            })
+                            self.photos.append(photo_url)
             elif "attachments" in post:
                 # Проходимся по всем вложениям поста
                 for i, attachment in enumerate(post["attachments"]):
                     # Отбираем только картинки
                     if attachment["type"] == "photo":
-                        photo_id = post["attachments"][i]["photo"]["id"]
                         photo_url = post["attachments"][i]["photo"]["sizes"][-1]["url"]
-
-                        self.photos.append({
-                            "id": photo_id,
-                            "url": photo_url
-                        })
-
-
-    def get_single_photo_data(self, post):
-        try:
-            if "copy_history" in post:
-                photo_id = post["copy_history"][0]["attachments"][0]["photo"]["id"]
-                photo_url = post["copy_history"][0]["attachments"][0]["photo"]["sizes"][-1]["url"]
-                return {
-                    "id": str(photo_id),
-                    "url": photo_url
-                }
-            else:
-                photo_id = post["attachments"][0]["photo"]["id"]
-                photo_url = post["attachments"][0]["photo"]["sizes"][-1]["url"]
-                return {
-                    "id": str(photo_id),
-                    "url": photo_url
-                }
-        except:
-            return None
+                        self.photos.append(photo_url)
 
     def download_photos(self, photos):
         """Скачиваем все фото из переданного списка"""
@@ -259,8 +231,8 @@ class GroupsPhotoDownloader:
         self.total_count = 0  # Количество скаченных фото
         pbar = tqdm(total=len(photos))
 
-        for photo in photos:
-            thread = threading.Thread(target=self.download_single_photo, args=(photo,))
+        for photo_url in photos:
+            thread = threading.Thread(target=self.download_single_photo, args=(photo_url,))
             thread_pool.append(thread)
             thread.start()
 
@@ -273,11 +245,9 @@ class GroupsPhotoDownloader:
         for thread in thread_pool:
             thread.join()
 
-    def download_single_photo(self, photo):
-        photo_id = photo["id"]
-        photo_url = photo["url"]
-        file_name = f"{photo_id}.jpg"
-        file_path = self.group_photos_path.joinpath(file_name)
+    def download_single_photo(self, photo_url):
+        file_name = ''.join([random.choice(string.ascii_lowercase + string.ascii_uppercase + string.ascii_letters) for _ in range(16)])
+        file_path = self.group_photos_path.joinpath(f"{file_name}.png")
 
         # Если фото ещё не скачено, то скачиваем его
         if not file_path.exists():
