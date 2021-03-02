@@ -205,21 +205,27 @@ class GroupsPhotoDownloader:
             if post["marked_as_ads"]:
                 continue
 
+            # Если пост скопирован с другой группы
             if "copy_history" in post:
                 if "attachments" in post["copy_history"][0]:
-                    # Проходимся по всем вложениям поста
-                    for i, attachment in enumerate(post["copy_history"][0]["attachments"]):
-                        # Отбираем только картинки
-                        if attachment["type"] == "photo":
-                            photo_url = post["copy_history"][0]["attachments"][i]["photo"]["sizes"][-1]["url"]
-                            self.photos.append(photo_url)
+                    self.get_single_post(post["copy_history"][0])
+
             elif "attachments" in post:
-                # Проходимся по всем вложениям поста
-                for i, attachment in enumerate(post["attachments"]):
-                    # Отбираем только картинки
-                    if attachment["type"] == "photo":
-                        photo_url = post["attachments"][i]["photo"]["sizes"][-1]["url"]
-                        self.photos.append(photo_url)
+                self.get_single_post(post)
+
+    def get_single_post(self, post):
+        # Проходимся по всем вложениям поста
+        for i, attachment in enumerate(post["attachments"]):
+            # Отбираем только картинки
+            if attachment["type"] == "photo":
+                photo_id = post["attachments"][i]["photo"]["id"]
+                owner_id = post["attachments"][i]["photo"]["owner_id"]
+                photo_url = post["attachments"][i]["photo"]["sizes"][-1]["url"]
+                self.photos.append({
+                    "id": photo_id,
+                    "owner_id": owner_id,
+                    "url": photo_url
+                })
 
     def download_photos(self, photos):
         """Скачиваем все фото из переданного списка"""
@@ -231,8 +237,8 @@ class GroupsPhotoDownloader:
         self.total_count = 0  # Количество скаченных фото
         pbar = tqdm(total=len(photos))
 
-        for photo_url in photos:
-            thread = threading.Thread(target=self.download_single_photo, args=(photo_url,))
+        for photo in photos:
+            thread = threading.Thread(target=self.download_single_photo, args=(photo,))
             thread_pool.append(thread)
             thread.start()
 
@@ -245,13 +251,14 @@ class GroupsPhotoDownloader:
         for thread in thread_pool:
             thread.join()
 
-    def download_single_photo(self, photo_url):
-        file_name = ''.join([random.choice(string.ascii_lowercase + string.ascii_uppercase + string.ascii_letters) for _ in range(16)])
+    def download_single_photo(self, photo):
+        # file_name = ''.join([random.choice(string.ascii_lowercase + string.ascii_uppercase + string.ascii_letters) for _ in range(16)])
+        file_name = f"{photo['owner_id']}_{photo['id']}"
         file_path = self.group_photos_path.joinpath(f"{file_name}.png")
 
         # Если фото ещё не скачено, то скачиваем его
         if not file_path.exists():
-            r = requests.get(photo_url)
+            r = requests.get(photo["url"])
             with open(file_path, "wb") as f:
                 f.write(r.content)
                 self.total_count += 1
