@@ -1,5 +1,6 @@
 ## Скрипт для скачивания фотографий пользователей / групп ВКонтакте
 
+[![Github All Releases](https://img.shields.io/github/downloads/YarikMix/vk-photos/total.svg)]()
 
 ## Системные требования:
 
