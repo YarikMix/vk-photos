@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 import random
 import time
+import timeit
 import string
 import threading
 from pathlib import Path
@@ -18,7 +19,7 @@ BASE_DIR = Path(__file__).resolve().parent
 PHOTOS_DIR = BASE_DIR.joinpath("Фотки")
 CONFIG_PATH = BASE_DIR.joinpath("config.yaml")
 
-with open(CONFIG_PATH) as ymlFile:
+with open(CONFIG_PATH, encoding="utf-8") as ymlFile:
     config = yaml.load(ymlFile.read(), Loader=yaml.Loader)
 
 def auth_handler(remember_device=None):
@@ -40,7 +41,7 @@ def auth():
         print("Неправильный логин или пароль")
         return None
 
-def check_id(id):
+def check_id(id: int):
     """Проверяем id на валидность"""
     try:
         id = int(id)
@@ -164,6 +165,8 @@ class UsersPhotoDownloader:
 
                 time_start = time.time()
                 self.download_photos(photos)
+
+                # print(timeit.timeit(setup=self.download_photos(photos)))
 
                 time_finish = time.time()
                 download_time = round(time_finish - time_start)
