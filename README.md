@@ -24,7 +24,7 @@ password: ""  # Ваш пароль он ВКонтакте
 python vk-photos/main.py
 ```
 
-Вводим id пользователя, чьи фотографии хотим скачать.<br>
+Вводим id пользователя, чьи фотографии хотим скачать<br>
 Для групп вводим id со знаком минус, например -93933459:
 ```bash
 Введите id человека, либо id группы(со знаком минус)
@@ -33,7 +33,7 @@ python vk-photos/main.py
 
 Узнать id человека или группы ВКонтакте можно [тут](https://regvk.com/id/)
 
-После того, как все фотографии скачаются, появится папка 'Фотки', в ней будут лежать папки с фотографиями пользователей и групп.
-![](https://github.com/YarikMix/vk-photos/raw/main/images/1.png)
-![](https://github.com/YarikMix/vk-photos/raw/main/images/2.png)
+После того, как все фотографии скачаются, появится папка 'Фотки' c фотографиями<br><br>
+![](https://github.com/YarikMix/vk-photos/raw/main/images/1.png)<br><br>
+![](https://github.com/YarikMix/vk-photos/raw/main/images/2.png)<br><br>
 ![](https://github.com/YarikMix/vk-photos/raw/main/images/3.png)
