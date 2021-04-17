@@ -1,15 +1,15 @@
-# -*- coding: utf-8 -*-
-import random
+import math
 import time
-import timeit
-import string
-import threading
+import logging
 from pathlib import Path
 
-import requests
-import vk_api
 import yaml
-from tqdm import tqdm
+import aiohttp
+import aiofiles
+import asyncio
+import vk_api
+from vk_api import audio
+from tqdm.asyncio import tqdm
 from pytils import numeral
 
 from functions import decline
@@ -18,9 +18,19 @@ from functions import decline
 BASE_DIR = Path(__file__).resolve().parent
 PHOTOS_DIR = BASE_DIR.joinpath("Фотки")
 CONFIG_PATH = BASE_DIR.joinpath("config.yaml")
+VK_CONFIG_PATH = BASE_DIR.joinpath("vk_config.v2.json")
 
 with open(CONFIG_PATH, encoding="utf-8") as ymlFile:
     config = yaml.load(ymlFile.read(), Loader=yaml.Loader)
+
+logging.basicConfig(
+    format='%(asctime)s - %(message)s',
+    datefmt='%d-%b-%y %H:%M:%S',
+    level=logging.INFO
+)
+
+logger = logging.getLogger('vk_api')
+logger.disabled = True
 
 def auth_handler(remember_device=None):
     code = input("Введите код подтверждения\n> ")
@@ -36,12 +46,14 @@ def auth():
     )
     try:
         vk_session.auth()
-        return vk_session.get_api()
-    except:
-        print("Неправильный логин или пароль")
-        return None
+    except Exception as e:
+        logging.info("Неправильный логин или пароль")
+        exit()
+    finally:
+        logging.info('Вы успешно авторизовались.')
+        return vk_session
 
-def check_id(id: int):
+def check_id(id: str):
     """Проверяем id на валидность"""
     try:
         id = int(id)
@@ -60,7 +72,7 @@ def check_id(id: int):
 
 
 class UsersPhotoDownloader:
-    def __init__(self, user_id):
+    def __init__(self, user_id: int):
         self.user_id = user_id
 
     def get_photos(self):
@@ -84,97 +96,95 @@ class UsersPhotoDownloader:
         for photo in raw_data:
             photos.append({
                 "id": photo["id"],
+                "owner_id": photo["owner_id"],
                 "url": photo["sizes"][-1]["url"]
             })
 
         return photos
 
-    def download_photos(self, photos):
-        """Скачиваем все фото из переданного списка"""
+    async def download_photo(self, session, photo_url, photo_path):
+        """Скачивает фото"""
+        async with session.get(photo_url) as response:
+            if response.status == 200:
+                async with aiofiles.open(photo_path, "wb") as f:
+                    await f.write(await response.read())
+                    await f.close()
 
-        # Number of parallel threads
-        self.lock = threading.Semaphore(4)
+    async def download_photos(self, photos: list):
+        """Скачивает все фото из переданного списка"""
+        async with aiohttp.ClientSession() as session:
+            futures = []
+            for photo in photos:
+                photo_title = "{}_{}.jpg".format(photo["id"], photo["owner_id"])
+                photo_path = self.user_photos_path.joinpath(photo_title)
+                futures.append(self.download_photo(session, photo["url"], photo_path))
 
-        # List of threads objects I so we can handle them later
-        thread_pool = []
+            for future in tqdm(asyncio.as_completed(futures), total=len(futures)):
+                await future
 
-        pbar = tqdm(total=len(photos))
-
-        for photo in photos:
-            thread = threading.Thread(target=self.download_single_photo, args=(photo,))
-            thread_pool.append(thread)
-            thread.start()
-
-            # Add one to our lock, so we will wait if needed.
-            self.lock.acquire()
-
-            pbar.update(1)
-
-        pbar.close()
-
-        for thread in thread_pool:
-            thread.join()
-
-    def download_single_photo(self, photo):
-        photo_id = photo["id"]
-        photo_url = photo["url"]
-        file_name = f"{photo_id}.jpg"
-        file_path = self.user_photos_path.joinpath(file_name)
-
-        # Если фото ещё не скачено, то скачиваем его
-        if not file_path.exists():
-            r = requests.get(photo_url)
-            with open(file_path, "wb") as f:
-                f.write(r.content)
-
-        self.lock.release()
-
-    def main(self):
+    async def main(self):
         user_info = vk.users.get(
             user_ids=self.user_id,
-            fields="sex"
+            fields="sex, photo_max_orig"
         )[0]
 
-        # Если страница пользователя удалена
+        decline_username = decline(
+            first_name=user_info["first_name"],
+            last_name=user_info["last_name"],
+            sex=user_info["sex"]
+        )
+
+        # Страница пользователя удалена
         if "deactivated" in user_info:
-            print("Эта страница удалена")
+            logging.info("Эта страница удалена")
         else:
-            decline_username = decline(
-                first_name=user_info["first_name"],
-                last_name=user_info["last_name"],
-                sex=user_info["sex"]
-            )
+            username = f"{user_info['first_name']} {user_info['last_name']}"
 
+            self.user_photos_path = PHOTOS_DIR.joinpath(username)
+
+            # Создаём папку c фотографиями пользователя, если её не существует
+            if not self.user_photos_path.exists():
+                logging.info(f"Создаём папку с фотографиями {decline_username}")
+                self.user_photos_path.mkdir()
+
+            photos = []
+
+            # Профиль закрыт
             if user_info["is_closed"] and not user_info["can_access_closed"]:
-                print(f"Профиль {decline_username} закрыт")
+                logging.info(f"Профиль {decline_username} закрыт :(")
+                photo_url = user_info["photo_max_orig"]
+                if photo_url == "https://vk.com/images/camera_400.png":
+                    logging.info("У пользователя нет аватарки")
+                else:
+                    photos = [{
+                        "id": self.user_id,
+                        "owner_id": self.user_id,
+                        "url": photo_url
+                    }]
             else:
-                username = f"{user_info['first_name']} {user_info['last_name']}"
-                self.user_photos_path = PHOTOS_DIR.joinpath(username)
+                logging.info("Получаем фотографии...")
 
-                # Создаём папку c фотографиями пользователя, если её не существует
-                if not self.user_photos_path.exists():
-                    print(f"Создаём папку с фотографиями {decline_username}")
-                    self.user_photos_path.mkdir()
-
+                # Получаем фотографии пользователя
                 photos = self.get_photos()
-                print("{} {} {}".format(
-                    numeral.choose_plural(len(photos), "Будет, Будут, Будут"),
-                    numeral.choose_plural(len(photos), "скачена, скачены, скачены"),
-                    numeral.get_plural(len(photos), "фотография, фотографии, фотографий")
-                ))
 
-                time_start = time.time()
-                self.download_photos(photos)
+            logging.info("{} {} {}".format(
+                numeral.choose_plural(len(photos), "Будет, Будут, Будут"),
+                numeral.choose_plural(len(photos), "скачена, скачены, скачены"),
+                numeral.get_plural(len(photos), "фотография, фотографии, фотографий")
+            ))
 
-                # print(timeit.timeit(setup=self.download_photos(photos)))
+            time_start = time.time()
 
-                time_finish = time.time()
-                download_time = round(time_finish - time_start)
-                print("{} {} за {}".format(
-                    numeral.choose_plural(len(photos), "Скачена, Скачены, Скачены"),
-                    numeral.get_plural(len(photos), "фотография, фотографии, фотографий"),
-                    numeral.get_plural(download_time, "секунду, секунды, секунд")
-                ))
+            # Скачиваем фотографии пользователя
+            await self.download_photos(photos)
+
+            time_finish = time.time()
+            download_time = math.ceil(time_finish - time_start)
+            logging.info("{} {} за {}".format(
+                numeral.choose_plural(len(photos), "Скачена, Скачены, Скачены"),
+                numeral.get_plural(len(photos), "фотография, фотографии, фотографий"),
+                numeral.get_plural(download_time, "секунду, секунды, секунд")
+            ))
 
 
 class GroupsPhotoDownloader:
@@ -201,7 +211,7 @@ class GroupsPhotoDownloader:
 
         return self.photos
 
-    def filter_posts(self, posts):
+    def filter_posts(self, posts: list):
         for post in posts:
 
             # Пропускаем посты с рекламой
@@ -216,7 +226,7 @@ class GroupsPhotoDownloader:
             elif "attachments" in post:
                 self.get_single_post(post)
 
-    def get_single_post(self, post):
+    def get_single_post(self, post: dict):
         # Проходимся по всем вложениям поста
         for i, attachment in enumerate(post["attachments"]):
             # Отбираем только картинки
@@ -226,106 +236,99 @@ class GroupsPhotoDownloader:
                 photo_url = post["attachments"][i]["photo"]["sizes"][-1]["url"]
                 self.photos.append({
                     "id": photo_id,
-                    "owner_id": owner_id,
+                    "owner_id": -owner_id,
                     "url": photo_url
                 })
 
-    def download_photos(self, photos):
-        """Скачиваем все фото из переданного списка"""
+    async def download_photo(self, session: aiohttp.ClientSession, photo_url: str, photo_path: Path):
+        """Скачивает фото"""
+        async with session.get(photo_url) as response:
+            if response.status == 200:
+                async with aiofiles.open(photo_path, "wb") as f:
+                    await f.write(await response.read())
+                    await f.close()
 
-        self.lock = threading.Semaphore(4)
+    async def download_photos(self, photos: list):
+        """Скачивает все фото из переданного списка"""
+        async with aiohttp.ClientSession() as session:
+            futures = []
+            for photo in photos:
+                photo_title = "{}_{}.jpg".format(photo["id"], photo["owner_id"])
+                photo_path = self.group_photos_path.joinpath(photo_title)
+                futures.append(self.download_photo(session, photo["url"], photo_path))
 
-        thread_pool = []
+            for future in tqdm(asyncio.as_completed(futures), total=len(futures)):
+                await future
 
-        self.total_count = 0  # Количество скаченных фото
-        pbar = tqdm(total=len(photos))
+    async def main(self):
+        # Получаем информацию о группе
+        group_info = vk.groups.getById(group_id=abs(self.group_id))[0]
+        group_name = group_info["name"].replace("/", " ").replace("|", " ").strip()
 
-        for photo in photos:
-            thread = threading.Thread(target=self.download_single_photo, args=(photo,))
-            thread_pool.append(thread)
-            thread.start()
+        self.group_photos_path = PHOTOS_DIR.joinpath(group_name)
 
-            self.lock.acquire()
+        # Создаём папку c фотографиями группы, если её не существует
+        if not self.group_photos_path.exists():
+            logging.info(f"Создаём папку с фотографиями группы '{group_name}'")
+            self.group_photos_path.mkdir()
 
-            pbar.update(1)
+        # Группа закрыта
+        if group_info["is_closed"]:
+            logging.info(f"Группа '{group_name}' закрыта :(")
 
-        pbar.close()
-
-        for thread in thread_pool:
-            thread.join()
-
-    def download_single_photo(self, photo):
-        # file_name = ''.join([random.choice(string.ascii_lowercase + string.ascii_uppercase + string.ascii_letters) for _ in range(16)])
-        file_name = f"{photo['owner_id']}_{photo['id']}"
-        file_path = self.group_photos_path.joinpath(f"{file_name}.png")
-
-        # Если фото ещё не скачено, то скачиваем его
-        if not file_path.exists():
-            r = requests.get(photo["url"])
-            with open(file_path, "wb") as f:
-                f.write(r.content)
-                self.total_count += 1
-
-        self.lock.release()
-
-    def get_group_info(self):
-        """Получаем название группы, а также информацию о том закрыта ли она"""
-        data = vk.groups.getById(
-            group_id=abs(self.group_id)
-        )
-
-        self.group_name = data[0]["name"].replace("/", " ").replace("|", " ").strip()
-        self.is_closed = data[0]["is_closed"]
-
-    def main(self):
-        self.get_group_info()  # Получаем информацию о группе
-
-        # Если группа закрыта, то завершаем программу
-        if self.is_closed:
-            print(f"Группа '{self.group_name}' закрыта")
+            max_size = list(group_info)[-1]
+            photo_url = group_info[max_size]
+            photos = [{
+                "id": -self.group_id,
+                "owner_id": -self.group_id,
+                "url": photo_url
+            }]
         else:
-            self.group_photos_path = PHOTOS_DIR.joinpath(self.group_name)
+            logging.info(f"Получаем фотографии...")
 
-            # Создаём папку c фотографиями группы, если её не существует
-            if not self.group_photos_path.exists():
-                print(f"Создаём папку с фотографиями группы '{self.group_name}'")
-                self.group_photos_path.mkdir()
+            # Получаем фотографии со стены группы
+            photos = self.get_photos()
 
-            print("Получаем фотографии группы")
-            photos = self.get_photos()  # Получаем фотографии со стены группы
-            print("{} {} {}".format(
-                numeral.choose_plural(len(photos), "Будет, Будут, Будут"),
-                numeral.choose_plural(len(photos), "скачена, скачены, скачены"),
-                numeral.get_plural(len(photos), "фотография, фотографии, фотографий")
-            ))
+        logging.info("{} {} {}".format(
+            numeral.choose_plural(len(photos), "Будет, Будут, Будут"),
+            numeral.choose_plural(len(photos), "скачена, скачены, скачены"),
+            numeral.get_plural(len(photos), "фотография, фотографии, фотографий")
+        ))
 
-            print("Начинаем скачивать фотографии")
-            time_start = time.time()
-            self.download_photos(photos)  # Скачиваем фотографии
+        time_start = time.time()
 
-            time_finish = time.time()
-            download_time = round(time_finish - time_start)
-            print("{} {} за {}".format(
-                numeral.choose_plural(self.total_count, "Скачена, Скачены, Скачены"),
-                numeral.get_plural(self.total_count, "фотография, фотографии, фотографий"),
-                numeral.get_plural(download_time, "секунду, секунды, секунд")
-            ))
+        # Скачиваем фотографии со стены группы
+        await self.download_photos(photos)
+
+        time_finish = time.time()
+        download_time = math.ceil(time_finish - time_start)
+        logging.info("{} {} за {}".format(
+            numeral.choose_plural(len(photos), "Скачена, Скачены, Скачены"),
+            numeral.get_plural(len(photos), "фотография, фотографии, фотографий"),
+            numeral.get_plural(download_time, "секунду, секунды, секунд")
+        ))
 
 
 if __name__ == '__main__':
-    # Создаём папку c фотографиями, если её не существует
+    # Создаём папку c загрузками, если её не существует
     if not PHOTOS_DIR.exists():
         PHOTOS_DIR.mkdir()
 
-    vk = auth()
+    vk_session = auth()
+    vk = vk_session.get_api()
+    vk_audio = audio.VkAudio(vk_session)
 
-    if vk != None:
-        id = input("Введите id человека, либо id группы(со знаком минус)\n> ")
-        if check_id(id) == "user":
-            Downloader = UsersPhotoDownloader(user_id=int(id))
-            Downloader.main()
-        elif check_id(id) == "group":
-            Downloader = GroupsPhotoDownloader(group_id=int(id))
-            Downloader.main()
-        else:
-            print("Пользователя / группы с таким id не существует")
+    loop = asyncio.get_event_loop()
+
+    id = input("Введите id человека, либо id группы(со знаком минус)\n> ")
+    id_type = check_id(id)
+    if id_type == "user":
+        downloader = UsersPhotoDownloader(user_id=int(id))
+        loop.run_until_complete(downloader.main())
+    elif id_type == "group":
+        downloader = GroupsPhotoDownloader(group_id=int(id))
+        loop.run_until_complete(downloader.main())
+    else:
+        logging.info("Пользователя / группы с таким id не существует")
+
+    VK_CONFIG_PATH.unlink()  # Удаляем конфиг вк

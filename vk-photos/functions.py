@@ -1,7 +1,6 @@
-import requests
 from pytrovich.enums import NamePart, Gender, Case
 from pytrovich.maker import PetrovichDeclinationMaker
-    
+
 
 maker = PetrovichDeclinationMaker()
 
