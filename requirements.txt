@@ -1,6 +1,7 @@
-pytils==0.3
 vk_api==11.9.1
-pytrovich==0.0.2
+pytils==0.3
 tqdm==4.56.0
-requests==2.22.0
+aiofiles==0.6.0
+aiohttp==3.7.4.post0
+pytrovich==0.0.2
 PyYAML==5.4.1
