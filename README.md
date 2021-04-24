@@ -1,6 +1,6 @@
 <h1 align="center">Скрипт для скачивания фотографий пользователей / групп ВКонтакте </h1>
 
-<a href="https://github.com/YarikMix/vk-admin-bot/vk-photos" style="margin: auto;">
+<a href="https://github.com/YarikMix/vk-admin-bot/vk-photos" style="text-align: center;">
 	<img src="https://img.shields.io/github/stars/YarikMix/vk-photos" alt="Stars Badge"/>
 </a>
 
