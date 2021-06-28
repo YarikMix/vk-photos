@@ -1,4 +1,4 @@
-<h1 align="center">Скрипт для скачивания фотографий пользователей / групп ВКонтакте </h1>
+<h1 align="center">Скрипт для скачивания фотографий пользователей / групп ВКонтакте</h1>
 
 <div align="center">
 	<a href="https://github.com/YarikMix/vk-admin-bot/vk-photos">
