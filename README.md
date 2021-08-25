@@ -35,7 +35,11 @@ python vk-photos/main.py
 Вводим 1, 2, 3 в зависимости от того, чьи фото мы хотим скачать
 ![](https://github.com/YarikMix/vk-photos/raw/main/images/1.png)
 
-Узнать id человека или группы ВКонтакте можно [тут](https://regvk.com/id/)
+
+<h1 align="center">Скачать фото пользователя</h1>
+
+Вводим id пользователя
+* Узнать id пользователя или группы ВКонтакте можно [тут](https://regvk.com/id/)
 
 После того, как все фотографии скачаются, появится папка 'Фотки' c фотографиями<br><br>
 ![](https://github.com/YarikMix/vk-photos/raw/main/images/10.png)<br><br>
