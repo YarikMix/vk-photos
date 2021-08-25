@@ -13,7 +13,7 @@ from tqdm.asyncio import tqdm
 from pytils import numeral
 
 from functions import decline
-from functions import write_json
+
 
 BASE_DIR = Path(__file__).resolve().parent
 DOWNLOADS_DIR = BASE_DIR.joinpath("Фотки")

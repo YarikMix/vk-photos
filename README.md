@@ -1,4 +1,4 @@
-<h1 align="center">Скрипт для скачивания фотографий пользователей / групп ВКонтакте</h1>
+<h1 align="center">Скрипт для скачивания фотографий пользователей / групп / бесед ВКонтакте</h1>
 
 <div align="center">
 	<a href="https://github.com/YarikMix/vk-admin-bot/vk-photos">
@@ -24,6 +24,7 @@ pip3 install -r requirements.txt
 ```yaml
 login: ""  # Ваш логин он ВКонтакте
 password: ""  # Ваш пароль он ВКонтакте
+token: ""  # Ваш токен (для скачивания фото участников беседы)
 ```
 
 Запускаем скрипт:
@@ -31,16 +32,12 @@ password: ""  # Ваш пароль он ВКонтакте
 python vk-photos/main.py
 ```
 
-Вводим id пользователя, чьи фотографии хотим скачать<br>
-Для групп вводим id со знаком минус, например -93933459:
-```bash
-Введите id человека, либо id группы(со знаком минус)
-> 
-```
+Вводим 1, 2, 3 в зависимости от того, чьи фото мы хотим скачать
+![](https://github.com/YarikMix/vk-photos/raw/main/images/1.png)
 
 Узнать id человека или группы ВКонтакте можно [тут](https://regvk.com/id/)
 
 После того, как все фотографии скачаются, появится папка 'Фотки' c фотографиями<br><br>
-![](https://github.com/YarikMix/vk-photos/raw/main/images/1.png)<br><br>
-![](https://github.com/YarikMix/vk-photos/raw/main/images/2.png)<br><br>
-![](https://github.com/YarikMix/vk-photos/raw/main/images/3.png)
+![](https://github.com/YarikMix/vk-photos/raw/main/images/10.png)<br><br>
+![](https://github.com/YarikMix/vk-photos/raw/main/images/21.png)<br><br>
+![](https://github.com/YarikMix/vk-photos/raw/main/images/30.png)
