@@ -46,6 +46,6 @@ python vk-photos/main.py
 * Узнать id пользователя или группы ВКонтакте можно [тут](https://regvk.com/id/)
 
 После того, как все фотографии скачаются, появится папка 'Фотки' c фотографиями<br><br>
-![](https://github.com/YarikMix/vk-photos/raw/main/images/10.png)<br><br>
-![](https://github.com/YarikMix/vk-photos/raw/main/images/21.png)<br><br>
-![](https://github.com/YarikMix/vk-photos/raw/main/images/30.png)
+![](https://github.com/YarikMix/vk-photos/raw/main/images/1.png)<br><br>
+![](https://github.com/YarikMix/vk-photos/raw/main/images/2.png)<br><br>
+![](https://github.com/YarikMix/vk-photos/raw/main/images/3.png)
