@@ -43,78 +43,74 @@ if not DOWNLOADS_DIR.exists():
 
 loop = asyncio.get_event_loop()
 
-def auth_handler(remember_device=None):
-    code = input("Введите код подтверждения\n> ")
-    if remember_device is None:
-        remember_device = True
-    return code, remember_device
 
-def auth():
-    try:
-        vk_session = vk_api.VkApi(
-            login=config["login"],
-            password=config["password"]
-        )
-        vk_session.auth()
-    except Exception as e:
-        logging.info("Неправильный логин или пароль")
-        exit()
-    finally:
-        logging.info('Вы успешно авторизовались.')
-        return vk_session.get_api()
+class Utils:
+    def auth(self):
+        try:
+            vk_session = vk_api.VkApi(
+                login=config["login"],
+                password=config["password"]
+            )
+            vk_session.auth()
+        except Exception as e:
+            logging.info("Неправильный логин или пароль")
+            exit()
+        finally:
+            logging.info('Вы успешно авторизовались.')
+            return vk_session.get_api()
 
-def auth_by_token():
-    try:
-        vk_session = vk_api.VkApi(
-            token=config["token"]
-        )
-    except Exception as e:
-        logging.info("Неправильный токен")
-        logging.info("Токен можно получить здесь https://vkhost.github.io/")
-        exit()
-    finally:
-        logging.info('Вы успешно авторизовались.')
-        return vk_session.get_api()
+    def auth_by_token(self):
+        try:
+            vk_session = vk_api.VkApi(
+                token=config["token"]
+            )
+        except Exception as e:
+            logging.info("Неправильный токен")
+            logging.info("Токен можно получить здесь https://vkhost.github.io/")
+            exit()
+        finally:
+            logging.info('Вы успешно авторизовались.')
+            return vk_session.get_api()
 
-def check_user_id(id: str):
-    try:
-        # Проверяем, существует ли пользователь с таким id
-        user = vk.users.get(user_ids=int(id))
-        if len(user) != 0: return True
-        return False
-    except:
-        return False
+    def check_user_id(self, id: str) -> bool:
+        try:
+            # Проверяем, существует ли пользователь с таким id
+            user = vk.users.get(user_ids=int(id))
+            if len(user) != 0: return True
+            return False
+        except:
+            return False
 
-def check_group_id(id: str):
-    try:
-        # Проверяем, существует ли группа с таким id
-        group = vk.groups.getById(group_id=int(id))
-        if len(group) != 0: return True
-        return False
-    except:
-        return False
+    def check_group_id(self, id: str) -> bool:
+        try:
+            # Проверяем, существует ли группа с таким id
+            group = vk.groups.getById(group_id=int(id))
+            if len(group) != 0: return True
+            return False
+        except:
+            return False
 
-def check_chat_id(id: str):
-    try:
-        # Проверяем, существует ли беседа с таким id
-        conversation = vk.messages.getConversationsById(peer_ids=2000000000 + int(id))
-        if conversation["count"] != 0: return True
-        return False
-    except:
-        return False
+    def check_chat_id(self, id: str) -> bool:
+        try:
+            # Проверяем, существует ли беседа с таким id
+            conversation = vk.messages.getConversationsById(peer_ids=2000000000 + int(id))
+            if conversation["count"] != 0: return True
+            return False
+        except:
+            return False
 
-def get_user_id():
-    return vk.account.getProfileInfo()["id"]
+    def get_user_id(self):
+        return vk.account.getProfileInfo()["id"]
 
-def get_username(user_id: str):
-    user = vk.users.get(user_id=user_id)[0]
-    return f"{user['first_name']} {user['last_name']}"
+    def get_username(self, user_id: str):
+        user = vk.users.get(user_id=user_id)[0]
+        return f"{user['first_name']} {user['last_name']}"
 
-def get_chat_title(chat_id: str):
-    chat_title = vk.messages.getConversationsById(
-        peer_ids=2000000000 + chat_id
-    )["items"][0]["chat_settings"]["title"]
-    return chat_title
+    def get_chat_title(self, chat_id: str):
+        chat_title = vk.messages.getConversationsById(
+            peer_ids=2000000000 + chat_id
+        )["items"][0]["chat_settings"]["title"]
+        return chat_title
 
 
 class UserPhotoDownloader:
@@ -238,6 +234,18 @@ class GroupPhotoDownloader:
 
         return self.photos
 
+    # def test(self):
+    #     self.photos = []
+    #     posts = vk.get_all_iter(
+    #         method="wall.get",
+    #         max_count=500,
+    #         values={
+    #             "owner_id": -self.group_id,
+    #             "count": 100,
+    #         }
+    #     )
+    #     print(len(posts))
+
     def filter_posts(self, posts: list):
         """
         Фильтруем посты на наличие рекламы
@@ -324,6 +332,8 @@ class GroupPhotoDownloader:
         dublicates_count = check_for_duplicates(group_dir)
         logging.info(f"Дубликатов удалено: {dublicates_count}")
 
+        logging.info(f"Итого скачено: {len(photos) - dublicates_count} фото")
+
 
 class ChatMembersPhotoDownloader:
     def __init__(self, chat_id: str):
@@ -343,12 +353,12 @@ class ChatMembersPhotoDownloader:
             if member_id > 0:
                 members_ids.append(member_id)
 
-        members_ids.remove(get_user_id())
+        members_ids.remove(utils.get_user_id())
 
         return members_ids
 
     async def main(self):
-        chat_title = get_chat_title(self.chat_id)
+        chat_title = utils.get_chat_title(self.chat_id)
 
         # Создаём папку с фотографиями участников беседы, если её не существует
         chat_dir = DOWNLOADS_DIR.joinpath(chat_title)
@@ -400,7 +410,7 @@ class ChatPhotoDownloader:
         return photos
 
     async def main(self):
-        chat_title = get_chat_title(self.chat_id)
+        chat_title = utils.get_chat_title(self.chat_id)
         photos_path = DOWNLOADS_DIR.joinpath(chat_title)
         if not photos_path.exists():
             logging.info(f"Создаём папку с фотографиями беседы '{chat_title}'")
@@ -408,14 +418,36 @@ class ChatPhotoDownloader:
 
         photos = self.get_attachments()
 
+        logging.info("{} {} {}".format(
+            numeral.choose_plural(len(photos), "Будет, Будут, Будут"),
+            numeral.choose_plural(len(photos), "скачена, скачены, скачены"),
+            numeral.get_plural(len(photos), "фотография, фотографии, фотографий")
+        ))
+
+        time_start = time.time()
+
+        # Скачиваем вложения беседы
         await download_photos(photos_path, photos)
+
+        time_finish = time.time()
+        download_time = math.ceil(time_finish - time_start)
+
+        logging.info("{} {} за {}".format(
+            numeral.choose_plural(len(photos), "Скачена, Скачены, Скачены"),
+            numeral.get_plural(len(photos), "фотография, фотографии, фотографий"),
+            numeral.get_plural(download_time, "секунду, секунды, секунд")
+        ))
 
         logging.info("Проверка на дубликаты")
         dublicates_count = check_for_duplicates(photos_path)
         logging.info(f"Дубликатов удалено: {dublicates_count}")
 
+        logging.info(f"Итого скачено: {len(photos) - dublicates_count} фото")
+
 
 if __name__ == '__main__':
+    utils = Utils()
+
     print("1. Скачать все фотографии пользователя")
     print("2. Скачать все фотографии со стены группы")
     print("3. Скачать все фотографии участников беседы")
@@ -423,38 +455,37 @@ if __name__ == '__main__':
     downloader_type = input("> ")
 
     if downloader_type == "1":
-        vk = auth()
+        vk = utils.auth()
         time.sleep(1)
         id = input("Введите id человека\n> ")
-        if check_user_id(id):
-            username = get_username(user_id=id)
+        if utils.check_user_id(id):
             downloader = UserPhotoDownloader(photos_dir=DOWNLOADS_DIR, user_id=id)
             loop.run_until_complete(downloader.main())
         else:
             print("Пользователя с таким id не существует")
     elif downloader_type == "2":
-        vk = auth()
+        vk = utils.auth()
         time.sleep(1)
         id = input("Введите id группы\n> ")
-        if check_group_id(id):
+        if utils.check_group_id(id):
             downloader = GroupPhotoDownloader(group_id=id)
             loop.run_until_complete(downloader.main())
         else:
             print("Группы с таким id не существует")
     elif downloader_type == "3":
-        vk = auth_by_token()
+        vk = utils.auth_by_token()
         time.sleep(1)
         id = input("Введите id беседы\n> ")
-        if check_chat_id(id):
+        if utils.check_chat_id(id):
             downloader = ChatMembersPhotoDownloader(chat_id=id)
             loop.run_until_complete(downloader.main())
         else:
             print("Беседы с таким id не существует")
     elif downloader_type == "4":
-        vk = auth_by_token()
+        vk = utils.auth_by_token()
         time.sleep(1)
         id = input("Введите id беседы\n> ")
-        if check_chat_id(id):
+        if utils.check_chat_id(id):
             downloader = ChatPhotoDownloader(chat_id=id)
             loop.run_until_complete(downloader.main())
         else:
