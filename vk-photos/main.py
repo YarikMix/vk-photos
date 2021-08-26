@@ -2,6 +2,7 @@ import math
 import time
 import logging
 from pathlib import Path
+from PIL import Image, ImageChops
 
 import yaml
 import requests
@@ -9,10 +10,14 @@ import aiohttp
 import aiofiles
 import asyncio
 import vk_api
-from tqdm.asyncio import tqdm
 from pytils import numeral
 
-from functions import decline
+from filter import check_for_duplicates
+from functions import (
+    decline,
+    download_photo,
+    download_photos
+)
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -105,22 +110,11 @@ def get_username(user_id: str):
     user = vk.users.get(user_id=user_id)[0]
     return f"{user['first_name']} {user['last_name']}"
 
-async def download_photo(session: aiohttp.ClientSession, photo_url: str, photo_path: Path):
-    async with session.get(photo_url) as response:
-        if response.status == 200:
-            async with aiofiles.open(photo_path, "wb") as f:
-                await f.write(await response.read())
-
-async def download_photos(photos_path: Path, photos: list):
-    async with aiohttp.ClientSession() as session:
-        futures = []
-        for photo in photos:
-            photo_title = "{}_{}.jpg".format(photo["owner_id"], photo["id"])
-            photo_path = photos_path.joinpath(photo_title)
-            futures.append(download_photo(session, photo["url"], photo_path))
-
-        for future in tqdm(asyncio.as_completed(futures), total=len(futures)):
-            await future
+def get_chat_title(chat_id: str):
+    chat_title = vk.messages.getConversationsById(
+        peer_ids=2000000000 + chat_id
+    )["items"][0]["chat_settings"]["title"]
+    return chat_title
 
 
 class UserPhotoDownloader:
@@ -282,12 +276,12 @@ class GroupPhotoDownloader:
         group_info = vk.groups.getById(group_id=self.group_id)[0]
         group_name = group_info["name"].replace("/", " ").replace("|", " ").strip()
 
-        group_photos_path = DOWNLOADS_DIR.joinpath(group_name)
+        group_dir = DOWNLOADS_DIR.joinpath(group_name)
 
         # Создаём папку c фотографиями группы, если её не существует
-        if not group_photos_path.exists():
+        if not group_dir.exists():
             logging.info(f"Создаём папку с фотографиями группы '{group_name}'")
-            group_photos_path.mkdir()
+            group_dir.mkdir()
 
         # Группа закрыта
         if group_info["is_closed"]:
@@ -315,7 +309,7 @@ class GroupPhotoDownloader:
         time_start = time.time()
 
         # Скачиваем фотографии со стены группы
-        await download_photos(group_photos_path, photos)
+        await download_photos(group_dir, photos)
 
         time_finish = time.time()
         download_time = math.ceil(time_finish - time_start)
@@ -326,8 +320,12 @@ class GroupPhotoDownloader:
             numeral.get_plural(download_time, "секунду, секунды, секунд")
         ))
 
+        logging.info("Проверка на дубликаты")
+        dublicates_count = check_for_duplicates(group_dir)
+        logging.info(f"Дубликатов удалено: {dublicates_count}")
 
-class ChatPhotoDownloader:
+
+class ChatMembersPhotoDownloader:
     def __init__(self, chat_id: str):
         self.chat_id = int(chat_id)
 
@@ -349,9 +347,29 @@ class ChatPhotoDownloader:
 
         return members_ids
 
+    async def main(self):
+        chat_title = get_chat_title(self.chat_id)
+
+        # Создаём папку с фотографиями участников беседы, если её не существует
+        chat_dir = DOWNLOADS_DIR.joinpath(chat_title)
+        if not chat_dir.exists():
+            logging.info(f"Создаём папку с фотографиями участников беседы '{chat_title}'")
+            chat_dir.mkdir()
+
+        members = self.get_members()
+
+        for user_id in members:
+            user_photo_downloader = UserPhotoDownloader(photos_dir=chat_dir, user_id=user_id)
+            await user_photo_downloader.main()
+
+
+class ChatPhotoDownloader:
+    def __init__(self, chat_id: str):
+        self.chat_id = int(chat_id)
+
     def download_chat_photo(self):
         """
-        Скачивает аватарку беседы если она есть
+        Скачиваем аватарку беседы если она есть
         """
         if "photo" in self.chat:
             sizes = self.chat["photo"]
@@ -364,31 +382,44 @@ class ChatPhotoDownloader:
                 with open(photo_path, mode="wb") as f:
                     f.write(response.content)
 
+    def get_attachments(self):
+        raw_data = vk.messages.getHistoryAttachments(
+            peer_id=2000000000 + self.chat_id,
+            media_type="photo"
+        )["items"]
+
+        photos = []
+
+        for photo in raw_data:
+            photos.append({
+                "id": photo["attachment"]["photo"]["id"],
+                "owner_id": photo["attachment"]["photo"]["owner_id"],
+                "url": photo["attachment"]["photo"]["sizes"][-1]["url"]
+            })
+
+        return photos
+
     async def main(self):
-        self.chat = vk.messages.getConversationsById(
-            peer_ids=2000000000 + self.chat_id
-        )["items"][0]["chat_settings"]
-        chat_name = self.chat["title"]
+        chat_title = get_chat_title(self.chat_id)
+        photos_path = DOWNLOADS_DIR.joinpath(chat_title)
+        if not photos_path.exists():
+            logging.info(f"Создаём папку с фотографиями беседы '{chat_title}'")
+            photos_path.mkdir()
 
-        # Создаём папку с фотографиями участников беседы, если её не существует
-        self.chat_dir = DOWNLOADS_DIR.joinpath(chat_name)
-        if not self.chat_dir.exists():
-            logging.info(f"Создаём папку с фотографиями участников беседы '{chat_name}'")
-            self.chat_dir.mkdir()
+        photos = self.get_attachments()
 
-        logging.info("Скачиваем аватарку беседы")
-        self.download_chat_photo()
-        members = self.get_members()
+        await download_photos(photos_path, photos)
 
-        for user_id in members:
-            user_photo_downloader = UserPhotoDownloader(photos_dir=self.chat_dir, user_id=user_id)
-            await user_photo_downloader.main()
+        logging.info("Проверка на дубликаты")
+        dublicates_count = check_for_duplicates(photos_path)
+        logging.info(f"Дубликатов удалено: {dublicates_count}")
 
 
 if __name__ == '__main__':
     print("1. Скачать все фотографии пользователя")
     print("2. Скачать все фотографии со стены группы")
-    print("3. Скачать все фотографии пользователей беседы")
+    print("3. Скачать все фотографии участников беседы")
+    print("4. Скачать все фотографии беседы")
     downloader_type = input("> ")
 
     if downloader_type == "1":
@@ -411,6 +442,15 @@ if __name__ == '__main__':
         else:
             print("Группы с таким id не существует")
     elif downloader_type == "3":
+        vk = auth_by_token()
+        time.sleep(1)
+        id = input("Введите id беседы\n> ")
+        if check_chat_id(id):
+            downloader = ChatMembersPhotoDownloader(chat_id=id)
+            loop.run_until_complete(downloader.main())
+        else:
+            print("Беседы с таким id не существует")
+    elif downloader_type == "4":
         vk = auth_by_token()
         time.sleep(1)
         id = input("Введите id беседы\n> ")
