@@ -16,7 +16,8 @@ from filter import check_for_duplicates
 from functions import (
     decline,
     download_photo,
-    download_photos
+    download_photos,
+    write_json
 )
 
 
@@ -37,14 +38,18 @@ logging.basicConfig(
 logger = logging.getLogger('vk_api')
 logger.disabled = True
 
-# Создаём папку c загрузками, если её не существует
-if not DOWNLOADS_DIR.exists():
-    DOWNLOADS_DIR.mkdir()
-
 loop = asyncio.get_event_loop()
 
 
 class Utils:
+    def create_dir(self, dir_path: Path):
+        if not dir_path.exists():
+            dir_path.mkdir()
+
+    def remove_dir(self, dir_path: Path):
+        if dir_path.exists():
+            dir_path.rmdir()
+
     def auth(self):
         try:
             vk_session = vk_api.VkApi(
@@ -54,6 +59,7 @@ class Utils:
             vk_session.auth()
         except Exception as e:
             logging.info("Неправильный логин или пароль")
+            print(e)
             exit()
         finally:
             logging.info('Вы успешно авторизовались.')
@@ -90,6 +96,16 @@ class Utils:
         except:
             return False
 
+    def check_group_ids(self, ids_list) -> bool:
+        try:
+            # Проверяем, существует ли группа с таким id
+            for group_id in ids_list.split(","):
+                if not self.check_group_id(group_id):
+                    return False
+            return True
+        except:
+            return False
+
     def check_chat_id(self, id: str) -> bool:
         try:
             # Проверяем, существует ли беседа с таким id
@@ -106,7 +122,12 @@ class Utils:
         user = vk.users.get(user_id=user_id)[0]
         return f"{user['first_name']} {user['last_name']}"
 
-    def get_chat_title(self, chat_id: str):
+    def get_group_title(self, group_id: str):
+        group_info = vk.groups.getById(group_id=group_id)
+        group_name = group_info[0]["name"].replace("/", " ").replace("|", " ").strip()
+        return group_name
+
+    def get_chat_title(self, chat_id: str) -> str:
         chat_title = vk.messages.getConversationsById(
             peer_ids=2000000000 + chat_id
         )["items"][0]["chat_settings"]["title"]
@@ -114,23 +135,25 @@ class Utils:
 
 
 class UserPhotoDownloader:
-    def __init__(self, photos_dir: Path, user_id: str):
-        self.photos_dir = photos_dir
+    def __init__(self, user_id: str, parent_dir=DOWNLOADS_DIR):
         self.user_id = int(user_id)
+        self.parent_dir = parent_dir
 
     def get_photos(self):
         # Собираем фото со стены
         photos_by_wall = vk.photos.get(
             user_id=self.user_id,
             album_id="wall",
-            photo_sizes=True
+            photo_sizes=True,
+            extended=True
         )["items"]
 
         # Собираем фото с профиля
         photos_by_profile = vk.photos.get(
             user_id=self.user_id,
             album_id="profile",
-            photo_sizes=True
+            photo_sizes=True,
+            extended=True
         )["items"]
 
         raw_data = photos_by_wall + photos_by_profile
@@ -140,7 +163,8 @@ class UserPhotoDownloader:
             photos.append({
                 "id": photo["id"],
                 "owner_id": photo["owner_id"],
-                "url": photo["sizes"][-1]["url"]
+                "url": photo["sizes"][-1]["url"],
+                "likes": photo["likes"]["count"]
             })
 
         return photos
@@ -157,37 +181,35 @@ class UserPhotoDownloader:
             sex=user_info["sex"]
         )
 
+        username = utils.get_username(self.user_id)
+
+        photos_path = self.parent_dir.joinpath(username)
+        utils.create_dir(photos_path)
+
+        write_json(user_info)
+
         # Страница пользователя удалена
         if "deactivated" in user_info:
             logging.info("Эта страница удалена")
+            utils.remove_dir(photos_path)
         else:
-            username = f"{user_info['first_name']} {user_info['last_name']}"
-            self.photos_path = self.photos_dir.joinpath(username)
-
-            # Создаём папку c фотографиями пользователя, если её не существует
-            if not self.photos_path.exists():
-                logging.info(f"Создаём папку с фотографиями {decline_username}")
-                self.photos_path.mkdir()
-
-            photos = []
-
             # Профиль закрыт
             if user_info["is_closed"] and not user_info["can_access_closed"]:
                 logging.info(f"Профиль {decline_username} закрыт :(")
-                photo_url = user_info["photo_max_orig"]
-                if photo_url == "https://vk.com/images/camera_400.png":
-                    logging.info(f"У {decline_username} нет аватарки")
-                else:
-                    photos = [{
-                        "id": self.user_id,
-                        "owner_id": self.user_id,
-                        "url": photo_url
-                    }]
+                photos = [{
+                    "id": self.user_id,
+                    "owner_id": self.user_id,
+                    "url": user_info["photo_max_orig"],
+                    "likes": 0
+                }]
             else:
                 logging.info(f"Получаем фотографии {decline_username}...")
 
                 # Получаем фотографии пользователя
                 photos = self.get_photos()
+
+            # Сортируем фотографии пользователя по дате
+            photos.sort(key=lambda k: k["likes"], reverse=True)
 
             logging.info("{} {} {}".format(
                 numeral.choose_plural(len(photos), "Будет, Будут, Будут"),
@@ -198,7 +220,7 @@ class UserPhotoDownloader:
             time_start = time.time()
 
             # Скачиваем фотографии пользователя
-            await download_photos(self.photos_path, photos)
+            await download_photos(photos_path, photos)
 
             time_finish = time.time()
             download_time = math.ceil(time_finish - time_start)
@@ -213,10 +235,7 @@ class GroupPhotoDownloader:
     def __init__(self, group_id: str):
         self.group_id = int(group_id)
 
-    def get_photos(self) -> list:
-        """Возвращает список всех фото со стены группы"""
-        self.photos = []
-
+    def get_photos(self):
         offset = 0
         while True:
             posts = vk.wall.get(
@@ -225,14 +244,24 @@ class GroupPhotoDownloader:
                 offset=offset
             )["items"]
 
-            self.filter_posts(posts)
+            for post in posts:
+
+                # Пропускаем посты с рекламой
+                if post["marked_as_ads"]:
+                    continue
+
+                # Если пост скопирован с другой группы
+                if "copy_history" in post:
+                    if "attachments" in post["copy_history"][0]:
+                        self.get_single_post(post["copy_history"][0])
+
+                elif "attachments" in post:
+                    self.get_single_post(post)
 
             if len(posts) < 100:
                 break
 
             offset += 100
-
-        return self.photos
 
     # def test(self):
     #     self.photos = []
@@ -246,23 +275,108 @@ class GroupPhotoDownloader:
     #     )
     #     print(len(posts))
 
-    def filter_posts(self, posts: list):
+    def get_single_post(self, post: dict):
         """
-        Фильтруем посты на наличие рекламы
+        Проходимся по всем вложениям поста и отбираем только картинки
         """
-        for post in posts:
+        for i, attachment in enumerate(post["attachments"]):
+            if attachment["type"] == "photo":
+                photo_id = post["attachments"][i]["photo"]["id"]
+                owner_id = post["attachments"][i]["photo"]["owner_id"]
+                photo_url = post["attachments"][i]["photo"]["sizes"][-1]["url"]
+                if "likes" in post:
+                    likes_count = post["likes"]["count"]
+                    self.photos.append({
+                        "id": photo_id,
+                        "owner_id": -owner_id,
+                        "url": photo_url,
+                        "likes": likes_count
+                    })
 
-            # Пропускаем посты с рекламой
-            if post["marked_as_ads"]:
-                continue
+    async def main(self):
+        # Получаем информацию о группе
+        group_info = vk.groups.getById(group_id=self.group_id)[0]
+        group_name = group_info["name"].replace("/", " ").replace("|", " ").strip()
 
-            # Если пост скопирован с другой группы
-            if "copy_history" in post:
-                if "attachments" in post["copy_history"][0]:
-                    self.get_single_post(post["copy_history"][0])
+        group_dir = DOWNLOADS_DIR.joinpath(group_name)
+        utils.create_dir(group_dir)
 
-            elif "attachments" in post:
-                self.get_single_post(post)
+        self.photos = []
+
+        # Группа закрыта
+        if group_info["is_closed"]:
+            logging.info(f"Группа '{group_name}' закрыта :(")
+            self.photos = [{
+                "id": self.group_id,
+                "owner_id": self.group_id,
+                "url": "https://vk.com/images/community_200.png"
+            }]
+        else:
+            logging.info(f"Получаем фотографии группы '{group_name}'...")
+
+            # Получаем фотографии со стены группы
+            self.get_photos()
+
+        # Сортируем фотографии по количеству лайков
+        self.photos.sort(key=lambda k: k["likes"], reverse=True)
+
+        logging.info("{} {} {}".format(
+            numeral.choose_plural(len(self.photos), "Будет, Будут, Будут"),
+            numeral.choose_plural(len(self.photos), "скачена, скачены, скачены"),
+            numeral.get_plural(len(self.photos), "фотография, фотографии, фотографий")
+        ))
+
+        time_start = time.time()
+
+        # Скачиваем фотографии со стены группы
+        await download_photos(group_dir, self.photos)
+
+        time_finish = time.time()
+        download_time = math.ceil(time_finish - time_start)
+
+        logging.info("{} {} за {}".format(
+            numeral.choose_plural(len(self.photos), "Скачена, Скачены, Скачены"),
+            numeral.get_plural(len(self.photos), "фотография, фотографии, фотографий"),
+            numeral.get_plural(download_time, "секунду, секунды, секунд")
+        ))
+
+        logging.info("Проверка на дубликаты")
+        dublicates_count = check_for_duplicates(group_dir)
+        logging.info(f"Дубликатов удалено: {dublicates_count}")
+
+        logging.info(f"Итого скачено: {len(self.photos) - dublicates_count} фото")
+
+
+class GroupsPhotoDownloader:
+    def __init__(self, group_ids: str):
+        self.group_ids = [int(id.strip()) for id in group_ids.split(",")]
+
+    def get_photos(self, group_id: int) -> list:
+        offset = 0
+        while True:
+            posts = vk.wall.get(
+                owner_id=-group_id,
+                count=100,
+                offset=offset
+            )["items"]
+
+            for post in posts:
+
+                # Пропускаем посты с рекламой
+                if post["marked_as_ads"]:
+                    continue
+
+                # Если пост скопирован с другой группы
+                if "copy_history" in post:
+                    if "attachments" in post["copy_history"][0]:
+                        self.get_single_post(post["copy_history"][0])
+                elif "attachments" in post:
+                    self.get_single_post(post)
+
+            if len(posts) < 100:
+                break
+
+            offset += 100
 
     def get_single_post(self, post: dict):
         """
@@ -273,104 +387,87 @@ class GroupPhotoDownloader:
                 photo_id = post["attachments"][i]["photo"]["id"]
                 owner_id = post["attachments"][i]["photo"]["owner_id"]
                 photo_url = post["attachments"][i]["photo"]["sizes"][-1]["url"]
-                self.photos.append({
-                    "id": photo_id,
-                    "owner_id": -owner_id,
-                    "url": photo_url
-                })
+                if "likes" in post:
+                    likes_count = post["likes"]["count"]
+                    self.photos.append({
+                        "id": photo_id,
+                        "owner_id": -owner_id,
+                        "url": photo_url,
+                        "likes": likes_count
+                    })
 
     async def main(self):
-        # Получаем информацию о группе
-        group_info = vk.groups.getById(group_id=self.group_id)[0]
-        group_name = group_info["name"].replace("/", " ").replace("|", " ").strip()
+        groups_name = ", ".join([utils.get_group_title(group_id) for group_id in self.group_ids])
+        photos_path = DOWNLOADS_DIR.joinpath(groups_name)
+        utils.create_dir(photos_path)
 
-        group_dir = DOWNLOADS_DIR.joinpath(group_name)
+        self.photos = []
 
-        # Создаём папку c фотографиями группы, если её не существует
-        if not group_dir.exists():
-            logging.info(f"Создаём папку с фотографиями группы '{group_name}'")
-            group_dir.mkdir()
+        for group_id in self.group_ids:
+            logging.info(f"Получаем фотографии группы '{utils.get_group_title(group_id)}'...")
+            self.get_photos(group_id)
 
-        # Группа закрыта
-        if group_info["is_closed"]:
-            logging.info(f"Группа '{group_name}' закрыта :(")
-
-            max_size = list(group_info)[-1]
-            photo_url = group_info[max_size]
-            photos = [{
-                "id": self.group_id,
-                "owner_id": self.group_id,
-                "url": photo_url
-            }]
-        else:
-            logging.info(f"Получаем фотографии...")
-
-            # Получаем фотографии со стены группы
-            photos = self.get_photos()
+        # Сортируем фотографии по количеству лайков
+        self.photos.sort(key=lambda k: k["likes"], reverse=True)
 
         logging.info("{} {} {}".format(
-            numeral.choose_plural(len(photos), "Будет, Будут, Будут"),
-            numeral.choose_plural(len(photos), "скачена, скачены, скачены"),
-            numeral.get_plural(len(photos), "фотография, фотографии, фотографий")
+            numeral.choose_plural(len(self.photos), "Будет, Будут, Будут"),
+            numeral.choose_plural(len(self.photos), "скачена, скачены, скачены"),
+            numeral.get_plural(len(self.photos), "фотография, фотографии, фотографий")
         ))
 
         time_start = time.time()
 
         # Скачиваем фотографии со стены группы
-        await download_photos(group_dir, photos)
+        await download_photos(photos_path, self.photos)
 
         time_finish = time.time()
         download_time = math.ceil(time_finish - time_start)
 
         logging.info("{} {} за {}".format(
-            numeral.choose_plural(len(photos), "Скачена, Скачены, Скачены"),
-            numeral.get_plural(len(photos), "фотография, фотографии, фотографий"),
+            numeral.choose_plural(len(self.photos), "Скачена, Скачены, Скачены"),
+            numeral.get_plural(len(self.photos), "фотография, фотографии, фотографий"),
             numeral.get_plural(download_time, "секунду, секунды, секунд")
         ))
 
         logging.info("Проверка на дубликаты")
-        dublicates_count = check_for_duplicates(group_dir)
+        dublicates_count = check_for_duplicates(photos_path)
         logging.info(f"Дубликатов удалено: {dublicates_count}")
 
-        logging.info(f"Итого скачено: {len(photos) - dublicates_count} фото")
+        logging.info(f"Итого скачено: {len(self.photos) - dublicates_count} фото")
 
 
 class ChatMembersPhotoDownloader:
     def __init__(self, chat_id: str):
         self.chat_id = int(chat_id)
 
-    def get_members(self) -> list:
-        """
-        Возвращает список из id участников беседы (не считая ботов и самого себя)
-        """
+    async def main(self):
+        chat_title = utils.get_chat_title(self.chat_id)
+        chat_path = DOWNLOADS_DIR.joinpath(chat_title)
+
+        # Создаём папку с фотографиями участников беседы, если её не существует
+        utils.create_dir(chat_path)
+
         members = vk.messages.getChat(
             chat_id=self.chat_id
         )["users"]
 
-        members_ids = []
+        if members == []:
+            logging.info("Вы вышли из этой беседы")
+            utils.remove_dir(chat_path)
+            DOWNLOADS_DIR.rmdir()
+        else:
+            members_ids = []
 
-        for member_id in members:
-            if member_id > 0:
-                members_ids.append(member_id)
+            for member_id in members:
+                if member_id > 0:
+                    members_ids.append(member_id)
 
-        members_ids.remove(utils.get_user_id())
+            members_ids.remove(utils.get_user_id())
 
-        return members_ids
-
-    async def main(self):
-        chat_title = utils.get_chat_title(self.chat_id)
-
-        # Создаём папку с фотографиями участников беседы, если её не существует
-        chat_dir = DOWNLOADS_DIR.joinpath(chat_title)
-        if not chat_dir.exists():
-            logging.info(f"Создаём папку с фотографиями участников беседы '{chat_title}'")
-            chat_dir.mkdir()
-
-        members = self.get_members()
-
-        for user_id in members:
-            user_photo_downloader = UserPhotoDownloader(photos_dir=chat_dir, user_id=user_id)
-            await user_photo_downloader.main()
+            for user_id in members:
+                user_photo_downloader = UserPhotoDownloader(user_id=user_id, parent_dir=chat_path)
+                await user_photo_downloader.main()
 
 
 class ChatPhotoDownloader:
@@ -447,11 +544,13 @@ class ChatPhotoDownloader:
 
 if __name__ == '__main__':
     utils = Utils()
+    utils.create_dir(DOWNLOADS_DIR)
 
     print("1. Скачать все фотографии пользователя")
     print("2. Скачать все фотографии со стены группы")
-    print("3. Скачать все фотографии участников беседы")
-    print("4. Скачать все фотографии беседы")
+    print("3. Скачать все фотографии нескольких групп")
+    print("4. Скачать все фотографии участников беседы")
+    print("5. Скачать все фотографии беседы")
     downloader_type = input("> ")
 
     if downloader_type == "1":
@@ -459,20 +558,29 @@ if __name__ == '__main__':
         time.sleep(1)
         id = input("Введите id человека\n> ")
         if utils.check_user_id(id):
-            downloader = UserPhotoDownloader(photos_dir=DOWNLOADS_DIR, user_id=id)
+            downloader = UserPhotoDownloader(user_id=id)
             loop.run_until_complete(downloader.main())
         else:
             print("Пользователя с таким id не существует")
     elif downloader_type == "2":
         vk = utils.auth()
         time.sleep(1)
-        id = input("Введите id группы\n> ")
+        id = input("Введите id группы \n> ")
         if utils.check_group_id(id):
             downloader = GroupPhotoDownloader(group_id=id)
             loop.run_until_complete(downloader.main())
         else:
             print("Группы с таким id не существует")
     elif downloader_type == "3":
+        vk = utils.auth()
+        time.sleep(1)
+        groups_ids = input("Введите id групп через запятую \n> ")
+        if utils.check_group_ids(groups_ids):
+            downloader = GroupsPhotoDownloader(group_ids=groups_ids)
+            loop.run_until_complete(downloader.main())
+        else:
+            print("Групп с таким id не существует")
+    elif downloader_type == "4":
         vk = utils.auth_by_token()
         time.sleep(1)
         id = input("Введите id беседы\n> ")
@@ -481,7 +589,7 @@ if __name__ == '__main__':
             loop.run_until_complete(downloader.main())
         else:
             print("Беседы с таким id не существует")
-    elif downloader_type == "4":
+    elif downloader_type == "5":
         vk = utils.auth_by_token()
         time.sleep(1)
         id = input("Введите id беседы\n> ")
