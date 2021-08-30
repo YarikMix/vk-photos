@@ -1,3 +1,5 @@
+import os
+import sys
 import math
 import time
 import logging
@@ -87,6 +89,15 @@ class Utils:
         except:
             return False
 
+    def check_user_ids(self, ids_list) -> bool:
+        try:
+            for user_id in ids_list.split(","):
+                if not self.check_user_id(user_id):
+                    return False
+            return True
+        except:
+            return False
+
     def check_group_id(self, id: str) -> bool:
         try:
             # Проверяем, существует ли группа с таким id
@@ -98,7 +109,6 @@ class Utils:
 
     def check_group_ids(self, ids_list) -> bool:
         try:
-            # Проверяем, существует ли группа с таким id
             for group_id in ids_list.split(","):
                 if not self.check_group_id(group_id):
                     return False
@@ -135,7 +145,7 @@ class Utils:
 
 
 class UserPhotoDownloader:
-    def __init__(self, user_id: str, parent_dir=DOWNLOADS_DIR):
+    def __init__(self, user_id, parent_dir=DOWNLOADS_DIR):
         self.user_id = int(user_id)
         self.parent_dir = parent_dir
 
@@ -164,7 +174,8 @@ class UserPhotoDownloader:
                 "id": photo["id"],
                 "owner_id": photo["owner_id"],
                 "url": photo["sizes"][-1]["url"],
-                "likes": photo["likes"]["count"]
+                "likes": photo["likes"]["count"],
+                "date": photo["date"]
             })
 
         return photos
@@ -185,8 +196,6 @@ class UserPhotoDownloader:
 
         photos_path = self.parent_dir.joinpath(username)
         utils.create_dir(photos_path)
-
-        write_json(user_info)
 
         # Страница пользователя удалена
         if "deactivated" in user_info:
@@ -209,7 +218,7 @@ class UserPhotoDownloader:
                 photos = self.get_photos()
 
             # Сортируем фотографии пользователя по дате
-            photos.sort(key=lambda k: k["likes"], reverse=True)
+            photos.sort(key=lambda k: k["date"], reverse=True)
 
             logging.info("{} {} {}".format(
                 numeral.choose_plural(len(photos), "Будет, Будут, Будут"),
@@ -229,6 +238,16 @@ class UserPhotoDownloader:
                 numeral.get_plural(len(photos), "фотография, фотографии, фотографий"),
                 numeral.get_plural(download_time, "секунду, секунды, секунд")
             ))
+
+
+class UsersPhotoDownloader:
+    def __init__(self, user_ids: list, parent_dir=DOWNLOADS_DIR):
+        self.user_ids = [id for id in user_ids]
+        self.parent_dir = parent_dir
+
+    async def main(self):
+        for user_id in self.user_ids:
+            await UserPhotoDownloader(user_id, self.parent_dir).main()
 
 
 class GroupPhotoDownloader:
@@ -263,6 +282,7 @@ class GroupPhotoDownloader:
 
             offset += 100
 
+    # Todo: понять как использовать get_all_iter
     # def test(self):
     #     self.photos = []
     #     posts = vk.get_all_iter(
@@ -351,7 +371,7 @@ class GroupsPhotoDownloader:
     def __init__(self, group_ids: str):
         self.group_ids = [int(id.strip()) for id in group_ids.split(",")]
 
-    def get_photos(self, group_id: int) -> list:
+    def get_photos(self, group_id: int):
         offset = 0
         while True:
             posts = vk.wall.get(
@@ -455,7 +475,6 @@ class ChatMembersPhotoDownloader:
         if members == []:
             logging.info("Вы вышли из этой беседы")
             utils.remove_dir(chat_path)
-            DOWNLOADS_DIR.rmdir()
         else:
             members_ids = []
 
@@ -465,9 +484,7 @@ class ChatMembersPhotoDownloader:
 
             members_ids.remove(utils.get_user_id())
 
-            for user_id in members:
-                user_photo_downloader = UserPhotoDownloader(user_id=user_id, parent_dir=chat_path)
-                await user_photo_downloader.main()
+            await UsersPhotoDownloader(user_ids=members_ids, parent_dir=chat_path).main()
 
 
 class ChatPhotoDownloader:
@@ -547,59 +564,95 @@ if __name__ == '__main__':
     utils.create_dir(DOWNLOADS_DIR)
 
     print("1. Скачать все фотографии пользователя")
-    print("2. Скачать все фотографии со стены группы")
-    print("3. Скачать все фотографии нескольких групп")
-    print("4. Скачать все фотографии участников беседы")
-    print("5. Скачать все фотографии беседы")
-    downloader_type = input("> ")
+    print("2. Скачать все фотографии нескольких пользователей")
+    print("3. Скачать все фотографии со стены группы")
+    print("4. Скачать все фотографии нескольких групп")
+    print("5. Скачать все фотографии участников беседы")
+    print("6. Скачать все вложения беседы")
 
-    if downloader_type == "1":
-        vk = utils.auth()
-        time.sleep(1)
-        id = input("Введите id человека\n> ")
-        if utils.check_user_id(id):
-            downloader = UserPhotoDownloader(user_id=id)
-            loop.run_until_complete(downloader.main())
+    while True:
+        time.sleep(0.1)
+        downloader_type = input("> ")
+        if downloader_type == "1":
+            vk = utils.auth()
+            time.sleep(0.1)
+            while True:
+                id = input("Введите id пользователя\n> ")
+                if utils.check_user_id(id):
+                    downloader = UserPhotoDownloader(user_id=id)
+                    loop.run_until_complete(downloader.main())
+                    break
+                else:
+                    logging.info("Пользователя с таким id не существует")
+                    time.sleep(0.1)
+            break
+        elif downloader_type == "2":
+            vk = utils.auth()
+            time.sleep(0.1)
+            while True:
+                user_ids = input("Введите id пользователей через запятую\n> ")
+                if utils.check_user_ids(user_ids):
+                    downloader = UsersPhotoDownloader(user_ids=user_ids.split(","))
+                    loop.run_until_complete(downloader.main())
+                    break
+                else:
+                    logging.info("Пользователей с таким id не существует")
+                    time.sleep(0.1)
+            break
+        elif downloader_type == "3":
+            vk = utils.auth()
+            time.sleep(0.1)
+            while True:
+                id = input("Введите id группы \n> ")
+                if utils.check_group_id(id):
+                    downloader = GroupPhotoDownloader(group_id=id)
+                    loop.run_until_complete(downloader.main())
+                    break
+                else:
+                    logging.info("Группы с таким id не существует")
+                    time.sleep(0.1)
+            break
+        elif downloader_type == "4":
+            vk = utils.auth()
+            time.sleep(0.1)
+            while True:
+                group_ids = input("Введите id групп через запятую\n> ")
+                if utils.check_group_ids(groups_ids):
+                    downloader = GroupsPhotoDownloader(group_ids=group_ids)
+                    loop.run_until_complete(downloader.main())
+                    break
+                else:
+                    logging.info("Групп с таким id не существует")
+                    time.sleep(0.1)
+            break
+        elif downloader_type == "5":
+            vk = utils.auth_by_token()
+            time.sleep(0.1)
+            while True:
+                id = input("Введите id беседы\n> ")
+                if utils.check_chat_id(id):
+                    downloader = ChatMembersPhotoDownloader(chat_id=id)
+                    loop.run_until_complete(downloader.main())
+                    break
+                else:
+                    logging.info("Беседы с таким id не существует")
+                    time.sleep(0.1)
+            break
+        elif downloader_type == "6":
+            vk = utils.auth_by_token()
+            time.sleep(0.1)
+            while True:
+                id = input("Введите id беседы\n> ")
+                if utils.check_chat_id(id):
+                    downloader = ChatPhotoDownloader(chat_id=id)
+                    loop.run_until_complete(downloader.main())
+                    break
+                else:
+                    logging.info("Беседы с таким id не существует")
+                    time.sleep(0.1)
+            break
         else:
-            print("Пользователя с таким id не существует")
-    elif downloader_type == "2":
-        vk = utils.auth()
-        time.sleep(1)
-        id = input("Введите id группы \n> ")
-        if utils.check_group_id(id):
-            downloader = GroupPhotoDownloader(group_id=id)
-            loop.run_until_complete(downloader.main())
-        else:
-            print("Группы с таким id не существует")
-    elif downloader_type == "3":
-        vk = utils.auth()
-        time.sleep(1)
-        groups_ids = input("Введите id групп через запятую \n> ")
-        if utils.check_group_ids(groups_ids):
-            downloader = GroupsPhotoDownloader(group_ids=groups_ids)
-            loop.run_until_complete(downloader.main())
-        else:
-            print("Групп с таким id не существует")
-    elif downloader_type == "4":
-        vk = utils.auth_by_token()
-        time.sleep(1)
-        id = input("Введите id беседы\n> ")
-        if utils.check_chat_id(id):
-            downloader = ChatMembersPhotoDownloader(chat_id=id)
-            loop.run_until_complete(downloader.main())
-        else:
-            print("Беседы с таким id не существует")
-    elif downloader_type == "5":
-        vk = utils.auth_by_token()
-        time.sleep(1)
-        id = input("Введите id беседы\n> ")
-        if utils.check_chat_id(id):
-            downloader = ChatPhotoDownloader(chat_id=id)
-            loop.run_until_complete(downloader.main())
-        else:
-            print("Беседы с таким id не существует")
-    else:
-        logging.info("Введите 1, 2 или 3")
+            logging.info("Неправильная команда")
 
     if VK_CONFIG_PATH.exists():
         VK_CONFIG_PATH.unlink()
