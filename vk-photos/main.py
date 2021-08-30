@@ -617,7 +617,7 @@ if __name__ == '__main__':
             time.sleep(0.1)
             while True:
                 group_ids = input("Введите id групп через запятую\n> ")
-                if utils.check_group_ids(groups_ids):
+                if utils.check_group_ids(group_ids):
                     downloader = GroupsPhotoDownloader(group_ids=group_ids)
                     loop.run_until_complete(downloader.main())
                     break
