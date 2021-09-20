@@ -134,7 +134,7 @@ class Utils:
 
     def get_group_title(self, group_id: str):
         group_info = vk.groups.getById(group_id=group_id)
-        group_name = group_info[0]["name"].replace("/", " ").replace("|", " ").strip()
+        group_name = group_info[0]["name"].replace("/", " ").replace("|", " ").replace(".", " ").strip()
         return group_name
 
     def get_chat_title(self, chat_id: str) -> str:
@@ -316,7 +316,7 @@ class GroupPhotoDownloader:
     async def main(self):
         # Получаем информацию о группе
         group_info = vk.groups.getById(group_id=self.group_id)[0]
-        group_name = group_info["name"].replace("/", " ").replace("|", " ").strip()
+        group_name = group_info["name"].replace("/", " ").replace("|", " ").replace(".", " ").strip()
 
         group_dir = DOWNLOADS_DIR.joinpath(group_name)
         utils.create_dir(group_dir)
