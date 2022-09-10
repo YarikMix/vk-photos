@@ -4,7 +4,7 @@ import math
 import time
 import logging
 from pathlib import Path
-from PIL import Image, ImageChops
+# from PIL import Image, ImageChops
 
 import yaml
 import requests
@@ -58,7 +58,9 @@ class Utils:
                 login=config["login"],
                 password=config["password"]
             )
+            print(1)
             vk_session.auth()
+            print(2)
         except Exception as e:
             logging.info("Неправильный логин или пароль")
             print(e)
@@ -104,7 +106,8 @@ class Utils:
             group = vk.groups.getById(group_id=int(id))
             if len(group) != 0: return True
             return False
-        except:
+        except Exception as e:
+            print(e)
             return False
 
     def check_group_ids(self, ids_list) -> bool:
@@ -600,7 +603,7 @@ if __name__ == '__main__':
                     time.sleep(0.1)
             break
         elif downloader_type == "3":
-            vk = utils.auth()
+            vk = utils.auth_by_token()
             time.sleep(0.1)
             while True:
                 id = input("Введите id группы \n> ")
