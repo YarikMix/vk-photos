@@ -12,6 +12,7 @@ import aiohttp
 import aiofiles
 import asyncio
 import vk_api
+import tqdm
 from pytils import numeral
 
 from filter import check_for_duplicates
@@ -24,7 +25,7 @@ from functions import (
 
 
 BASE_DIR = Path(__file__).resolve().parent
-DOWNLOADS_DIR = BASE_DIR.joinpath("Фотки")
+DOWNLOADS_DIR = Path('D:\ghd').resolve().joinpath("Фотки")#BASE_DIR.joinpath("Фотки")
 CONFIG_PATH = BASE_DIR.joinpath("config.yaml")
 VK_CONFIG_PATH = BASE_DIR.joinpath("vk_config.v2.json")
 
@@ -153,33 +154,113 @@ class UserPhotoDownloader:
         self.parent_dir = parent_dir
 
     def get_photos(self):
-        # Собираем фото со стены
-        photos_by_wall = vk.photos.get(
-            user_id=self.user_id,
-            album_id="wall",
-            photo_sizes=True,
-            extended=True
-        )["items"]
-
-        # Собираем фото с профиля
-        photos_by_profile = vk.photos.get(
-            user_id=self.user_id,
-            album_id="profile",
-            photo_sizes=True,
-            extended=True
-        )["items"]
-
-        raw_data = photos_by_wall + photos_by_profile
         photos = []
+       
+        offset = 0
+        while True:
+            # Собираем фото с сохраненок
+            photos_by_saved = vk.photos.get(
+                user_id=self.user_id,
+                count=100,
+                offset=offset,
+                album_id="saved",
+                photo_sizes=True,
+                extended=True
+            )["items"]
 
-        for photo in raw_data:
-            photos.append({
-                "id": photo["id"],
-                "owner_id": photo["owner_id"],
-                "url": photo["sizes"][-1]["url"],
-                "likes": photo["likes"]["count"],
-                "date": photo["date"]
-            })
+            raw_data = photos_by_saved#photos_by_wall + photos_by_profile
+
+            for photo in raw_data:
+                photos.append({
+                    "id": photo["id"],
+                    "owner_id": photo["owner_id"],
+                    "url": photo["sizes"][-1]["url"],
+                    "likes": photo["likes"]["count"],
+                    "date": photo["date"]
+                })
+            
+            if len(raw_data) < 100:
+                break
+            offset += 100
+
+        offset = 0
+        while True:
+            # Собираем фото с профиля
+            photos_by_profile = vk.photos.get(
+                user_id=self.user_id,
+                count=100,
+                offset=offset,
+                album_id="profile",
+                photo_sizes=True,
+                extended=True
+            )["items"]
+
+            raw_data = photos_by_profile#photos_by_wall + photos_by_profile
+
+            for photo in raw_data:
+                photos.append({
+                    "id": photo["id"],
+                    "owner_id": photo["owner_id"],
+                    "url": photo["sizes"][-1]["url"],
+                    "likes": photo["likes"]["count"],
+                    "date": photo["date"]
+                })
+            
+            if len(raw_data) < 100:
+                break
+            offset += 100
+
+        offset = 0
+        while True:
+            # Собираем фото со стены
+            photos_by_wall = vk.photos.get(
+                user_id=self.user_id,
+                count=100,
+                offset=offset,
+                album_id="wall",
+                photo_sizes=True,
+                extended=True
+            )["items"]
+
+            raw_data = photos_by_wall#photos_by_wall + photos_by_profile
+
+            for photo in raw_data:
+                photos.append({
+                    "id": photo["id"],
+                    "owner_id": photo["owner_id"],
+                    "url": photo["sizes"][-1]["url"],
+                    "likes": photo["likes"]["count"],
+                    "date": photo["date"]
+                })
+            
+            if len(raw_data) < 100:
+                break
+            offset += 100
+        
+        offset = 0
+        while True:
+            all_photos = vk.photos.getAll(
+                owner_id = self.user_id,
+                count=100,
+                offset=offset,
+                photo_sizes=True,
+                extended=True
+            )["items"]
+
+            raw_data = all_photos#photos_by_wall + photos_by_profile
+
+            for photo in raw_data:
+                photos.append({
+                    "id": photo["id"],
+                    "owner_id": photo["owner_id"],
+                    "url": photo["sizes"][-1]["url"],
+                    "likes": photo["likes"]["count"],
+                    "date": photo["date"]
+                })
+            
+            if len(raw_data) < 100:
+                break
+            offset += 100
 
         return photos
 
@@ -257,7 +338,7 @@ class GroupPhotoDownloader:
     def __init__(self, group_id: str):
         self.group_id = int(group_id)
 
-    def get_photos(self):
+    async def get_photos(self):
         offset = 0
         while True:
             posts = vk.wall.get(
@@ -265,7 +346,6 @@ class GroupPhotoDownloader:
                 count=100,
                 offset=offset
             )["items"]
-
             for post in posts:
 
                 # Пропускаем посты с рекламой
@@ -284,6 +364,7 @@ class GroupPhotoDownloader:
                 break
 
             offset += 100
+        
 
     # Todo: понять как использовать get_all_iter
     # def test(self):
@@ -302,19 +383,47 @@ class GroupPhotoDownloader:
         """
         Проходимся по всем вложениям поста и отбираем только картинки
         """
+        
         for i, attachment in enumerate(post["attachments"]):
             if attachment["type"] == "photo":
+                file_type = attachment["type"]
                 photo_id = post["attachments"][i]["photo"]["id"]
                 owner_id = post["attachments"][i]["photo"]["owner_id"]
                 photo_url = post["attachments"][i]["photo"]["sizes"][-1]["url"]
                 if "likes" in post:
                     likes_count = post["likes"]["count"]
                     self.photos.append({
+                        "type": file_type,
                         "id": photo_id,
                         "owner_id": -owner_id,
                         "url": photo_url,
                         "likes": likes_count
                     })
+            '''Too slow      
+            if attachment["type"] == "video":
+                file_type = attachment["type"]
+                photo_id = post["attachments"][i]["video"]["id"]
+                owner_id = post["attachments"][i]["video"]["owner_id"]
+                vid_resp = vk.video.get(owner_id=owner_id, id=photo_id, v=5.199, access_token=vk.token)["items"][0]["files"]#["mp4_1080"]
+                if "mp4_1080" in vid_resp:
+                    photo_url = vid_resp["mp4_1080"]
+                    print(photo_url)
+                elif "mp4_720" in vid_resp:
+                    photo_url = vid_resp["mp4_720"]
+                    print(photo_url)
+                else:
+                    photo_url = vid_resp["mp4_480"]
+
+                if "likes" in post:
+                    likes_count = post["likes"]["count"]
+                    self.photos.append({
+                        "type": file_type,
+                        "id": photo_id,
+                        "owner_id": -owner_id,
+                        "url": photo_url,
+                        "likes": likes_count
+                    })
+                    '''  
 
     async def main(self):
         # Получаем информацию о группе
@@ -338,7 +447,7 @@ class GroupPhotoDownloader:
             logging.info(f"Получаем фотографии группы '{group_name}'...")
 
             # Получаем фотографии со стены группы
-            self.get_photos()
+            await self.get_photos()
 
         # Сортируем фотографии по количеству лайков
         self.photos.sort(key=lambda k: k["likes"], reverse=True)
@@ -577,7 +686,7 @@ if __name__ == '__main__':
         time.sleep(0.1)
         downloader_type = input("> ")
         if downloader_type == "1":
-            vk = utils.auth()
+            vk = utils.auth_by_token()
             time.sleep(0.1)
             while True:
                 id = input("Введите id пользователя\n> ")
@@ -590,7 +699,7 @@ if __name__ == '__main__':
                     time.sleep(0.1)
             break
         elif downloader_type == "2":
-            vk = utils.auth()
+            vk = utils.auth_by_token()
             time.sleep(0.1)
             while True:
                 user_ids = input("Введите id пользователей через запятую\n> ")
@@ -616,7 +725,7 @@ if __name__ == '__main__':
                     time.sleep(0.1)
             break
         elif downloader_type == "4":
-            vk = utils.auth()
+            vk = utils.auth_by_token()
             time.sleep(0.1)
             while True:
                 group_ids = input("Введите id групп через запятую\n> ")
