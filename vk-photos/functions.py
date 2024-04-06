@@ -39,7 +39,10 @@ async def download_photos(photos_path: Path, photos: list):
     async with aiohttp.ClientSession() as session:
         futures = []
         for i, photo in enumerate(photos, start=1):
-            photo_title = "{}_{}_{}_{}.jpg".format(i, photo.get("likes", ""), photo["owner_id"], photo["id"])
+            #if photo["type"] == "video":
+            #    photo_title = "{}_{}_{}_{}.mp4".format(i, photo.get("likes", ""), photo["owner_id"], photo["id"])
+            #else:
+            photo_title = "{}_{}.jpg".format(photo["owner_id"], photo["id"])
             photo_path = photos_path.joinpath(photo_title)
             futures.append(download_photo(session, photo["url"], photo_path))
 
