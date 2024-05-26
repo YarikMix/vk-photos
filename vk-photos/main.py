@@ -407,7 +407,7 @@ class GroupPhotoDownloader:
                     photo_path = group_dir.joinpath(photo_title)
                     video_link = 'https://vk.com/video_ext.php?oid={}&id={}'.format(owner_id,video_id) #https://vk.com/video_ext.php?oid=-219265779&id=456239543
                     print(photo_title)
-                    ydl_opts = {'outtmpl': '{}'.format(photo_path), 'quiet': True}#, 'progress_hooks': [self.my_hook]}
+                    ydl_opts = {'outtmpl': '{}'.format(photo_path), 'quiet': True, 'retries': 10}#, 'progress_hooks': [self.my_hook]}
                     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                         ydl.download(video_link)
                     '''self.photos.append({
