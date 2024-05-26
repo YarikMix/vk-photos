@@ -449,19 +449,17 @@ class GroupPhotoDownloader:
                 "url": "https://vk.com/images/community_200.png"
             }]
         else:
-            while True:
-                download_videos = input("Скачать также видео? 1-да 2-нет (сначала будут скачены видео)\n> ")
-                if download_videos == "1":
-                    logging.info(f"Получаем фотографии и видео группы '{group_name}'...")
-                    await self.get_photos(group_dir, download_videos)
-                    break
-                elif download_videos == "2":
-                    logging.info(f"Получаем фотографии группы '{group_name}'...")
-                    await self.get_photos(group_dir, download_videos)
-                    break
-                else:
-                    logging.info("Введено некорректное значение")
-                    time.sleep(0.1)
+            download_videos = input("Скачать также видео? 1-да 2-нет (сначала будут скачены видео)\n> ")
+            if download_videos == "1":
+                logging.info(f"Получаем фотографии и видео группы '{group_name}'...")
+                await self.get_photos(group_dir, download_videos)
+            elif download_videos == "2":
+                logging.info(f"Получаем фотографии группы '{group_name}'...")
+                await self.get_photos(group_dir, download_videos)
+            else:
+                logging.info("Введено некорректное значение")
+                time.sleep(0.1)
+                exit
             #logging.info(f"Получаем фотографии группы '{group_name}'...")
 
             # Получаем фотографии со стены группы
@@ -581,6 +579,7 @@ class GroupsPhotoDownloader:
             else:
                 logging.info("Введено некорректное значение")
                 time.sleep(0.1)
+                exit
 
 
         logging.info("{} {} {}".format(
