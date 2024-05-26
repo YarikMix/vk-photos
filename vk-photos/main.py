@@ -1,5 +1,5 @@
-import os
-import sys
+#import os
+#import sys
 import math
 import time
 import logging
@@ -8,21 +8,21 @@ from pathlib import Path
 
 import yaml
 import requests
-import aiohttp
-import aiofiles
+#import aiohttp
+#import aiofiles
 import asyncio
 import vk_api
-import tqdm
+#import tqdm
 from pytils import numeral
 
 from filter import check_for_duplicates
 from functions import (
     decline,
-    download_photo,
-    download_photos,
-    write_json
+    #download_photo,
+    download_photos
+    #write_json
 )
-
+import yt_dlp
 
 BASE_DIR = Path(__file__).resolve().parent
 DOWNLOADS_DIR = Path('D:\ghd').resolve().joinpath("Фотки")#BASE_DIR.joinpath("Фотки")
@@ -338,7 +338,7 @@ class GroupPhotoDownloader:
     def __init__(self, group_id: str):
         self.group_id = int(group_id)
 
-    async def get_photos(self):
+    async def get_photos(self, group_dir, download_videos):
         offset = 0
         while True:
             posts = vk.wall.get(
@@ -355,10 +355,10 @@ class GroupPhotoDownloader:
                 # Если пост скопирован с другой группы
                 if "copy_history" in post:
                     if "attachments" in post["copy_history"][0]:
-                        self.get_single_post(post["copy_history"][0])
+                        self.get_single_post(post["copy_history"][0], group_dir, download_videos)
 
                 elif "attachments" in post:
-                    self.get_single_post(post)
+                    self.get_single_post(post, group_dir, download_videos)
 
             if len(posts) < 100:
                 break
@@ -379,51 +379,56 @@ class GroupPhotoDownloader:
     #     )
     #     print(len(posts))
 
-    def get_single_post(self, post: dict):
+    def get_single_post(self, post: dict, group_dir, download_videos):
         """
         Проходимся по всем вложениям поста и отбираем только картинки
         """
-        
-        for i, attachment in enumerate(post["attachments"]):
-            if attachment["type"] == "photo":
-                file_type = attachment["type"]
-                photo_id = post["attachments"][i]["photo"]["id"]
-                owner_id = post["attachments"][i]["photo"]["owner_id"]
-                photo_url = post["attachments"][i]["photo"]["sizes"][-1]["url"]
-                if "likes" in post:
-                    likes_count = post["likes"]["count"]
-                    self.photos.append({
+        try:
+            for i, attachment in enumerate(post["attachments"]):
+                if attachment["type"] == "photo":
+                    file_type = attachment["type"]
+                    photo_id = post["attachments"][i]["photo"]["id"]
+                    owner_id = post["attachments"][i]["photo"]["owner_id"]
+                    photo_url = post["attachments"][i]["photo"]["sizes"][-1].get("url")
+                    if photo_url != None or photo_url != '':
+                        self.photos.append({
+                            "type": file_type,
+                            "id": photo_id,
+                            "owner_id": -owner_id,
+                            "url": photo_url
+                        })
+                #Too slow      
+                if attachment["type"] == "video" and download_videos == "1":
+                    file_type = attachment["type"]
+                    video_id = post["attachments"][i]["video"].get("id")
+                    owner_id = post["attachments"][i]["video"].get("owner_id")
+                    title = post["attachments"][i]["video"].get("title")
+                    photo_title = "{}_{}_{}.mp4".format(owner_id, video_id, title)
+                    photo_path = group_dir.joinpath(photo_title)
+                    video_link = 'https://vk.com/video_ext.php?oid={}&id={}'.format(owner_id,video_id) #https://vk.com/video_ext.php?oid=-219265779&id=456239543
+                    print(photo_title)
+                    ydl_opts = {'outtmpl': '{}'.format(photo_path), 'quiet': True}#, 'progress_hooks': [self.my_hook]}
+                    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                        ydl.download(video_link)
+                    '''self.photos.append({
                         "type": file_type,
                         "id": photo_id,
-                        "owner_id": -owner_id,
-                        "url": photo_url,
-                        "likes": likes_count
-                    })
-            '''Too slow      
-            if attachment["type"] == "video":
-                file_type = attachment["type"]
-                photo_id = post["attachments"][i]["video"]["id"]
-                owner_id = post["attachments"][i]["video"]["owner_id"]
-                vid_resp = vk.video.get(owner_id=owner_id, id=photo_id, v=5.199, access_token=vk.token)["items"][0]["files"]#["mp4_1080"]
-                if "mp4_1080" in vid_resp:
-                    photo_url = vid_resp["mp4_1080"]
-                    print(photo_url)
-                elif "mp4_720" in vid_resp:
-                    photo_url = vid_resp["mp4_720"]
-                    print(photo_url)
-                else:
-                    photo_url = vid_resp["mp4_480"]
+                        "owner_id": owner_id,
+                        "url": vid_resp
+                    })'''
+        except Exception as e:
+            print(e)
 
-                if "likes" in post:
-                    likes_count = post["likes"]["count"]
-                    self.photos.append({
-                        "type": file_type,
-                        "id": photo_id,
-                        "owner_id": -owner_id,
-                        "url": photo_url,
-                        "likes": likes_count
-                    })
-                    '''  
+    '''def my_hook(self, d):
+        if d['status'] == 'downloading':
+            percent_str_clear = d['_percent_str'].replace('[0;94m', '')
+            percent_str = percent_str_clear
+            percent_str = ''.join(chr for chr in percent_str if chr.isprintable())
+            percent = percent_str.split('%')[0].strip()
+            #root.after(0, lambda: self.status_label.configure(text=f"Скачиваем... {percent}% ", font=("Arial", 10)))
+        elif d['status'] == 'finished':
+            pass
+            #root.after(0, lambda: self.status_label.configure(text="Загрузка завершена!", font=("Arial", 10)))'''
 
     async def main(self):
         # Получаем информацию о группе
@@ -444,13 +449,24 @@ class GroupPhotoDownloader:
                 "url": "https://vk.com/images/community_200.png"
             }]
         else:
-            logging.info(f"Получаем фотографии группы '{group_name}'...")
+            while True:
+                download_videos = input("Скачать также видео? 1-да 2-нет (сначала будут скачены видео)\n> ")
+                if download_videos == "1":
+                    logging.info(f"Получаем фотографии и видео группы '{group_name}'...")
+                    await self.get_photos(group_dir, download_videos)
+                    break
+                elif download_videos == "2":
+                    logging.info(f"Получаем фотографии группы '{group_name}'...")
+                    await self.get_photos(group_dir, download_videos)
+                    break
+                else:
+                    logging.info("Введено некорректное значение")
+                    time.sleep(0.1)
+            #logging.info(f"Получаем фотографии группы '{group_name}'...")
 
             # Получаем фотографии со стены группы
-            await self.get_photos()
+            #await self.get_photos(group_dir)
 
-        # Сортируем фотографии по количеству лайков
-        self.photos.sort(key=lambda k: k["likes"], reverse=True)
 
         logging.info("{} {} {}".format(
             numeral.choose_plural(len(self.photos), "Будет, Будут, Будут"),
@@ -483,7 +499,7 @@ class GroupsPhotoDownloader:
     def __init__(self, group_ids: str):
         self.group_ids = [int(id.strip()) for id in group_ids.split(",")]
 
-    def get_photos(self, group_id: int):
+    async def get_photos(self, group_id, group_dir, download_videos):
         offset = 0
         while True:
             posts = vk.wall.get(
@@ -491,7 +507,6 @@ class GroupsPhotoDownloader:
                 count=100,
                 offset=offset
             )["items"]
-
             for post in posts:
 
                 # Пропускаем посты с рекламой
@@ -501,46 +516,72 @@ class GroupsPhotoDownloader:
                 # Если пост скопирован с другой группы
                 if "copy_history" in post:
                     if "attachments" in post["copy_history"][0]:
-                        self.get_single_post(post["copy_history"][0])
+                        self.get_single_post(post["copy_history"][0], group_dir, download_videos)
+
                 elif "attachments" in post:
-                    self.get_single_post(post)
+                    self.get_single_post(post, group_dir, download_videos)
 
             if len(posts) < 100:
                 break
 
             offset += 100
 
-    def get_single_post(self, post: dict):
+    def get_single_post(self, post: dict, group_dir, download_videos):
         """
         Проходимся по всем вложениям поста и отбираем только картинки
         """
-        for i, attachment in enumerate(post["attachments"]):
-            if attachment["type"] == "photo":
-                photo_id = post["attachments"][i]["photo"]["id"]
-                owner_id = post["attachments"][i]["photo"]["owner_id"]
-                photo_url = post["attachments"][i]["photo"]["sizes"][-1]["url"]
-                if "likes" in post:
-                    likes_count = post["likes"]["count"]
-                    self.photos.append({
+        try:
+            for i, attachment in enumerate(post["attachments"]):
+                if attachment["type"] == "photo":
+                    file_type = attachment["type"]
+                    photo_id = post["attachments"][i]["photo"]["id"]
+                    owner_id = post["attachments"][i]["photo"]["owner_id"]
+                    photo_url = post["attachments"][i]["photo"]["sizes"][-1].get("url")
+                    if photo_url != None or photo_url != '':
+                        self.photos.append({
+                            "type": file_type,
+                            "id": photo_id,
+                            "owner_id": -owner_id,
+                            "url": photo_url
+                        })
+                #Too slow      
+                if attachment["type"] == "video" and download_videos == "1":
+                    file_type = attachment["type"]
+                    video_id = post["attachments"][i]["video"].get("id")
+                    owner_id = post["attachments"][i]["video"].get("owner_id")
+                    title = post["attachments"][i]["video"].get("title")
+                    photo_title = "{}_{}_{}.mp4".format(owner_id, video_id, title)
+                    photo_path = group_dir.joinpath(photo_title)
+                    video_link = 'https://vk.com/video_ext.php?oid={}&id={}'.format(owner_id,video_id) #https://vk.com/video_ext.php?oid=-219265779&id=456239543
+                    print(photo_title)
+                    ydl_opts = {'outtmpl': '{}'.format(photo_path), 'quiet': True}#, 'progress_hooks': [self.my_hook]}
+                    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                        ydl.download(video_link)
+                    '''self.photos.append({
+                        "type": file_type,
                         "id": photo_id,
-                        "owner_id": -owner_id,
-                        "url": photo_url,
-                        "likes": likes_count
-                    })
+                        "owner_id": owner_id,
+                        "url": vid_resp
+                    })'''
+        except Exception as e:
+            print(e)
 
     async def main(self):
+        download_videos = input("Скачать также видео? 1-да 2-нет (сначала будут скачены видео)\n> ")
         groups_name = ", ".join([utils.get_group_title(group_id) for group_id in self.group_ids])
-        photos_path = DOWNLOADS_DIR.joinpath(groups_name)
-        utils.create_dir(photos_path)
-
+        group_dir = DOWNLOADS_DIR.joinpath(groups_name)
         self.photos = []
-
         for group_id in self.group_ids:
-            logging.info(f"Получаем фотографии группы '{utils.get_group_title(group_id)}'...")
-            self.get_photos(group_id)
+            if download_videos == "1":
+                logging.info(f"Получаем фотографии и видео группы '{groups_name}'...")
+                await self.get_photos(group_id, group_dir, download_videos)
+            elif download_videos == "2":
+                logging.info(f"Получаем фотографии группы '{groups_name}'...")
+                await self.get_photos(group_id, group_dir, download_videos)
+            else:
+                logging.info("Введено некорректное значение")
+                time.sleep(0.1)
 
-        # Сортируем фотографии по количеству лайков
-        self.photos.sort(key=lambda k: k["likes"], reverse=True)
 
         logging.info("{} {} {}".format(
             numeral.choose_plural(len(self.photos), "Будет, Будут, Будут"),
@@ -551,7 +592,7 @@ class GroupsPhotoDownloader:
         time_start = time.time()
 
         # Скачиваем фотографии со стены группы
-        await download_photos(photos_path, self.photos)
+        await download_photos(group_dir, self.photos)
 
         time_finish = time.time()
         download_time = math.ceil(time_finish - time_start)
@@ -563,7 +604,7 @@ class GroupsPhotoDownloader:
         ))
 
         logging.info("Проверка на дубликаты")
-        dublicates_count = check_for_duplicates(photos_path)
+        dublicates_count = check_for_duplicates(group_dir)
         logging.info(f"Дубликатов удалено: {dublicates_count}")
 
         logging.info(f"Итого скачено: {len(self.photos) - dublicates_count} фото")
