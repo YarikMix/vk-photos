@@ -772,6 +772,60 @@ class ChatPhotoDownloader:
         logging.info(f"Дубликатов удалено: {dublicates_count}")
 
         logging.info(f"Итого скачено: {len(photos) - dublicates_count} фото")
+        
+class ChatUserPhotoDownloader:
+    def __init__(self, chat_id: str, parent_dir=DOWNLOADS_DIR):
+        self.chat_id = int(chat_id)
+        self.parent_dir = parent_dir
+        
+    def get_attachments(self):
+        raw_data = vk.messages.getHistoryAttachments(
+            peer_id=self.chat_id,
+            media_type="photo"
+        )["items"]
+
+        photos = []
+
+        for photo in raw_data:
+            photos.append({
+                "id": photo["attachment"]["photo"]["id"],
+                "owner_id": photo["attachment"]["photo"]["owner_id"],
+                "url": photo["attachment"]["photo"]["sizes"][-1]["url"]
+            })
+
+        return photos
+    async def main(self):
+        username = utils.get_username(self.chat_id)
+
+        photos_path = self.parent_dir.joinpath(f"Переписка {username}")
+        utils.create_dir(photos_path)
+        
+        photos = self.get_attachments()
+        
+        logging.info("{} {} {}".format(
+            numeral.choose_plural(len(photos), "Будет, Будут, Будут"),
+            numeral.choose_plural(len(photos), "скачена, скачены, скачены"),
+            numeral.get_plural(len(photos), "фотография, фотографии, фотографий")
+        ))
+
+        time_start = time.time()
+         
+        await download_photos(photos_path, photos)
+
+        time_finish = time.time()
+        download_time = math.ceil(time_finish - time_start)
+
+        logging.info("{} {} за {}".format(
+            numeral.choose_plural(len(photos), "Скачена, Скачены, Скачены"),
+            numeral.get_plural(len(photos), "фотография, фотографии, фотографий"),
+            numeral.get_plural(download_time, "секунду, секунды, секунд")
+        ))
+
+        logging.info("Проверка на дубликаты")
+        dublicates_count = check_for_duplicates(photos_path)
+        logging.info(f"Дубликатов удалено: {dublicates_count}")
+
+        logging.info(f"Итого скачено: {len(photos) - dublicates_count} фото")
 
 
 class ChatUserPhotoDownloader:
