@@ -604,6 +604,9 @@ class GroupsPhotoDownloader:
         group_dir = DOWNLOADS_DIR.joinpath(groups_name)
         self.photos = []
         self.videos_list = []
+
+        download_vid = input("Скачать также видео? 1-да 2-нет\n> ")
+        
         for group_id in self.group_ids:
             group_info = vk.groups.getById(group_id=group_id)[0]
             # Группа закрыта
@@ -615,7 +618,6 @@ class GroupsPhotoDownloader:
                     "url": "https://vk.com/images/community_200.png"
                 }]
             else:
-                download_vid = input("Скачать также видео? 1-да 2-нет\n> ")
                 if download_vid == "1":
                     logging.info(f"Получаем фотографии и видео группы '{groups_name}'...")
                     await self.get_photos(group_id, download_vid)
