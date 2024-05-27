@@ -7,7 +7,7 @@ import asyncio
 from tqdm.asyncio import tqdm
 from pytrovich.enums import NamePart, Gender, Case
 from pytrovich.maker import PetrovichDeclinationMaker
-
+import yt_dlp
 
 maker = PetrovichDeclinationMaker()
 
@@ -45,3 +45,20 @@ async def download_photos(photos_path: Path, photos: list):
 
         for future in tqdm(asyncio.as_completed(futures), total=len(futures)):
             await future
+
+async def download_video(video_path, video_link):
+    ydl_opts = {'outtmpl': '{}'.format(video_path), 'quiet': True, 'retries': 10}
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        ydl.download(video_link)
+        print("Видео загружено: {}".format(video_link))
+
+async def download_videos(videos_path: Path, videos: list):
+    futures = []
+    for i, video in enumerate(videos, start=1):
+        filename = "{}_{}.mp4".format(video["owner_id"], video["id"])#, video["title"])
+        video_path = videos_path.joinpath(filename)
+        futures.append(download_video(video_path, video["player"]))
+    print(len(futures))
+    for future in tqdm(asyncio.as_completed(futures), total=len(futures)):
+        await future
+            

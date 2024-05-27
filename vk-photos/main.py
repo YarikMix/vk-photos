@@ -18,9 +18,8 @@ from pytils import numeral
 from filter import check_for_duplicates
 from functions import (
     decline,
-    #download_photo,
-    download_photos
-    #write_json
+    download_photos,
+    download_videos
 )
 import yt_dlp
 
@@ -338,7 +337,7 @@ class GroupPhotoDownloader:
     def __init__(self, group_id: str):
         self.group_id = int(group_id)
 
-    async def get_photos(self, group_dir, download_videos):
+    async def get_photos(self, download_videos):
         offset = 0
         while True:
             posts = vk.wall.get(
@@ -355,31 +354,41 @@ class GroupPhotoDownloader:
                 # Если пост скопирован с другой группы
                 if "copy_history" in post:
                     if "attachments" in post["copy_history"][0]:
-                        self.get_single_post(post["copy_history"][0], group_dir, download_videos)
+                        self.get_single_post(post["copy_history"][0])
 
                 elif "attachments" in post:
-                    self.get_single_post(post, group_dir, download_videos)
+                    self.get_single_post(post)
 
             if len(posts) < 100:
                 break
 
             offset += 100
-        
+        if download_videos == "1":
+            logging.info("Получаем список видео")
+            offset = 0
+            while True:
+                videos = vk.video.get(
+                    owner_id=-self.group_id,
+                    count=100,
+                    offset=offset
+                )["items"]
+                for video in videos:
+                    if "player" in video:
+                        self.videos_list.append({
+                            "type": video.get("type"),
+                            "id": video.get("id"),
+                            "owner_id": video.get("owner_id"),
+                            "title": video.get("title"),
+                            "player": video.get("player")
+                        })
 
-    # Todo: понять как использовать get_all_iter
-    # def test(self):
-    #     self.photos = []
-    #     posts = vk.get_all_iter(
-    #         method="wall.get",
-    #         max_count=500,
-    #         values={
-    #             "owner_id": -self.group_id,
-    #             "count": 100,
-    #         }
-    #     )
-    #     print(len(posts))
+                if len(videos) < 100:
+                    logging.info(f"Всего получено {len(self.videos_list)} видео")
+                    break
 
-    def get_single_post(self, post: dict, group_dir, download_videos):
+                offset += 100
+
+    def get_single_post(self, post: dict):
         """
         Проходимся по всем вложениям поста и отбираем только картинки
         """
@@ -397,7 +406,7 @@ class GroupPhotoDownloader:
                             "owner_id": -owner_id,
                             "url": photo_url
                         })
-                #Too slow      
+                '''#Too slow      
                 if attachment["type"] == "video" and download_videos == "1":
                     file_type = attachment["type"]
                     video_id = post["attachments"][i]["video"].get("id")
@@ -410,7 +419,7 @@ class GroupPhotoDownloader:
                     ydl_opts = {'outtmpl': '{}'.format(photo_path), 'quiet': True, 'retries': 10}#, 'progress_hooks': [self.my_hook]}
                     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                         ydl.download(video_link)
-                    '''self.photos.append({
+                    self.photos.append({
                         "type": file_type,
                         "id": photo_id,
                         "owner_id": owner_id,
@@ -418,17 +427,6 @@ class GroupPhotoDownloader:
                     })'''
         except Exception as e:
             print(e)
-
-    '''def my_hook(self, d):
-        if d['status'] == 'downloading':
-            percent_str_clear = d['_percent_str'].replace('[0;94m', '')
-            percent_str = percent_str_clear
-            percent_str = ''.join(chr for chr in percent_str if chr.isprintable())
-            percent = percent_str.split('%')[0].strip()
-            #root.after(0, lambda: self.status_label.configure(text=f"Скачиваем... {percent}% ", font=("Arial", 10)))
-        elif d['status'] == 'finished':
-            pass
-            #root.after(0, lambda: self.status_label.configure(text="Загрузка завершена!", font=("Arial", 10)))'''
 
     async def main(self):
         # Получаем информацию о группе
@@ -439,6 +437,7 @@ class GroupPhotoDownloader:
         utils.create_dir(group_dir)
 
         self.photos = []
+        self.videos_list = []
 
         # Группа закрыта
         if group_info["is_closed"]:
@@ -449,13 +448,36 @@ class GroupPhotoDownloader:
                 "url": "https://vk.com/images/community_200.png"
             }]
         else:
-            download_videos = input("Скачать также видео? 1-да 2-нет (сначала будут скачены видео)\n> ")
-            if download_videos == "1":
+            download_vid = input("Скачать также видео? 1-да 2-нет\n> ")
+            if download_vid == "1":
                 logging.info(f"Получаем фотографии и видео группы '{group_name}'...")
-                await self.get_photos(group_dir, download_videos)
-            elif download_videos == "2":
+                await self.get_photos(download_vid)
+                logging.info("{} {} {}".format(
+                numeral.choose_plural(len(self.photos), "Будет, Будут, Будут"),
+                numeral.choose_plural(len(self.photos), "скачена, скачены, скачены"),
+                numeral.get_plural(len(self.photos), "фотография, фотографии, фотографий")
+                ))
+
+                time_start = time.time()
+
+                # Скачиваем фотографии со стены группы
+                await download_photos(group_dir, self.photos)
+                logging.info("Скачиваем видео")
+                await download_videos(group_dir, self.videos_list)
+
+            elif download_vid == "2":
                 logging.info(f"Получаем фотографии группы '{group_name}'...")
-                await self.get_photos(group_dir, download_videos)
+                await self.get_photos(download_vid)
+                logging.info("{} {} {}".format(
+                numeral.choose_plural(len(self.photos), "Будет, Будут, Будут"),
+                numeral.choose_plural(len(self.photos), "скачена, скачены, скачены"),
+                numeral.get_plural(len(self.photos), "фотография, фотографии, фотографий")
+                ))
+
+                time_start = time.time()
+
+                # Скачиваем фотографии со стены группы
+                await download_photos(group_dir, self.photos)
             else:
                 logging.info("Введено некорректное значение")
                 time.sleep(0.1)
@@ -464,18 +486,6 @@ class GroupPhotoDownloader:
 
             # Получаем фотографии со стены группы
             #await self.get_photos(group_dir)
-
-
-        logging.info("{} {} {}".format(
-            numeral.choose_plural(len(self.photos), "Будет, Будут, Будут"),
-            numeral.choose_plural(len(self.photos), "скачена, скачены, скачены"),
-            numeral.get_plural(len(self.photos), "фотография, фотографии, фотографий")
-        ))
-
-        time_start = time.time()
-
-        # Скачиваем фотографии со стены группы
-        await download_photos(group_dir, self.photos)
 
         time_finish = time.time()
         download_time = math.ceil(time_finish - time_start)
@@ -497,7 +507,7 @@ class GroupsPhotoDownloader:
     def __init__(self, group_ids: str):
         self.group_ids = [int(id.strip()) for id in group_ids.split(",")]
 
-    async def get_photos(self, group_id, group_dir, download_videos):
+    async def get_photos(self, group_id, download_videos):
         offset = 0
         while True:
             posts = vk.wall.get(
@@ -514,17 +524,41 @@ class GroupsPhotoDownloader:
                 # Если пост скопирован с другой группы
                 if "copy_history" in post:
                     if "attachments" in post["copy_history"][0]:
-                        self.get_single_post(post["copy_history"][0], group_dir, download_videos)
+                        self.get_single_post(post["copy_history"][0])
 
                 elif "attachments" in post:
-                    self.get_single_post(post, group_dir, download_videos)
+                    self.get_single_post(post)
 
             if len(posts) < 100:
                 break
 
             offset += 100
+        if download_videos == "1":
+            logging.info("Получаем список видео")
+            offset = 0
+            while True:
+                videos = vk.video.get(
+                    owner_id=-group_id,
+                    count=100,
+                    offset=offset
+                )["items"]
+                for video in videos:
+                    if "player" in video:
+                        self.videos_list.append({
+                            "type": video.get("type"),
+                            "id": video.get("id"),
+                            "owner_id": video.get("owner_id"),
+                            "title": video.get("title"),
+                            "player": video.get("player")
+                        })
 
-    def get_single_post(self, post: dict, group_dir, download_videos):
+                if len(videos) < 100:
+                    logging.info(f"Всего получено {len(self.videos_list)} видео")
+                    break
+
+                offset += 100
+
+    def get_single_post(self, post: dict):
         """
         Проходимся по всем вложениям поста и отбираем только картинки
         """
@@ -539,10 +573,10 @@ class GroupsPhotoDownloader:
                         self.photos.append({
                             "type": file_type,
                             "id": photo_id,
-                            "owner_id": -owner_id,
+                            "owner_id": owner_id,
                             "url": photo_url
                         })
-                #Too slow      
+                '''#Too slow      
                 if attachment["type"] == "video" and download_videos == "1":
                     file_type = attachment["type"]
                     video_id = post["attachments"][i]["video"].get("id")
@@ -552,10 +586,10 @@ class GroupsPhotoDownloader:
                     photo_path = group_dir.joinpath(photo_title)
                     video_link = 'https://vk.com/video_ext.php?oid={}&id={}'.format(owner_id,video_id) #https://vk.com/video_ext.php?oid=-219265779&id=456239543
                     print(photo_title)
-                    ydl_opts = {'outtmpl': '{}'.format(photo_path), 'quiet': True}#, 'progress_hooks': [self.my_hook]}
+                    ydl_opts = {'outtmpl': '{}'.format(photo_path), 'quiet': True, 'retries': 10}#, 'progress_hooks': [self.my_hook]}
                     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                         ydl.download(video_link)
-                    '''self.photos.append({
+                    self.photos.append({
                         "type": file_type,
                         "id": photo_id,
                         "owner_id": owner_id,
@@ -565,48 +599,75 @@ class GroupsPhotoDownloader:
             print(e)
 
     async def main(self):
-        download_videos = input("Скачать также видео? 1-да 2-нет (сначала будут скачены видео)\n> ")
+        #download_vid = input("Скачать также видео? 1-да 2-нет (сначала будут скачены видео)\n> ")
         groups_name = ", ".join([utils.get_group_title(group_id) for group_id in self.group_ids])
         group_dir = DOWNLOADS_DIR.joinpath(groups_name)
         self.photos = []
+        self.videos_list = []
         for group_id in self.group_ids:
-            if download_videos == "1":
-                logging.info(f"Получаем фотографии и видео группы '{groups_name}'...")
-                await self.get_photos(group_id, group_dir, download_videos)
-            elif download_videos == "2":
-                logging.info(f"Получаем фотографии группы '{groups_name}'...")
-                await self.get_photos(group_id, group_dir, download_videos)
+            group_info = vk.groups.getById(group_id=group_id)[0]
+            # Группа закрыта
+            if group_info["is_closed"]:
+                logging.info(f"Группа '{groups_name}' закрыта :(")
+                self.photos = [{
+                    "id": group_id,
+                    "owner_id": -group_id,
+                    "url": "https://vk.com/images/community_200.png"
+                }]
             else:
-                logging.info("Введено некорректное значение")
-                time.sleep(0.1)
-                exit
+                download_vid = input("Скачать также видео? 1-да 2-нет\n> ")
+                if download_vid == "1":
+                    logging.info(f"Получаем фотографии и видео группы '{groups_name}'...")
+                    await self.get_photos(group_id, download_vid)
+                    logging.info("{} {} {}".format(
+                    numeral.choose_plural(len(self.photos), "Будет, Будут, Будут"),
+                    numeral.choose_plural(len(self.photos), "скачена, скачены, скачены"),
+                    numeral.get_plural(len(self.photos), "фотография, фотографии, фотографий")
+                    ))
 
+                    time_start = time.time()
 
-        logging.info("{} {} {}".format(
-            numeral.choose_plural(len(self.photos), "Будет, Будут, Будут"),
-            numeral.choose_plural(len(self.photos), "скачена, скачены, скачены"),
-            numeral.get_plural(len(self.photos), "фотография, фотографии, фотографий")
-        ))
+                    # Скачиваем фотографии со стены группы
+                    await download_photos(group_dir, self.photos)
+                    logging.info("Скачиваем видео")
+                    await download_videos(group_dir, self.videos_list)
 
-        time_start = time.time()
+                elif download_vid == "2":
+                    logging.info(f"Получаем фотографии группы '{groups_name}'...")
+                    await self.get_photos(group_id, download_vid)
+                    logging.info("{} {} {}".format(
+                    numeral.choose_plural(len(self.photos), "Будет, Будут, Будут"),
+                    numeral.choose_plural(len(self.photos), "скачена, скачены, скачены"),
+                    numeral.get_plural(len(self.photos), "фотография, фотографии, фотографий")
+                    ))
 
-        # Скачиваем фотографии со стены группы
-        await download_photos(group_dir, self.photos)
+                    time_start = time.time()
 
-        time_finish = time.time()
-        download_time = math.ceil(time_finish - time_start)
+                    # Скачиваем фотографии со стены группы
+                    await download_photos(group_dir, self.photos)
+                else:
+                    logging.info("Введено некорректное значение")
+                    time.sleep(0.1)
+                    exit
+                #logging.info(f"Получаем фотографии группы '{group_name}'...")
 
-        logging.info("{} {} за {}".format(
-            numeral.choose_plural(len(self.photos), "Скачена, Скачены, Скачены"),
-            numeral.get_plural(len(self.photos), "фотография, фотографии, фотографий"),
-            numeral.get_plural(download_time, "секунду, секунды, секунд")
-        ))
+                # Получаем фотографии со стены группы
+                #await self.get_photos(group_dir)
 
-        logging.info("Проверка на дубликаты")
-        dublicates_count = check_for_duplicates(group_dir)
-        logging.info(f"Дубликатов удалено: {dublicates_count}")
+            time_finish = time.time()
+            download_time = math.ceil(time_finish - time_start)
 
-        logging.info(f"Итого скачено: {len(self.photos) - dublicates_count} фото")
+            logging.info("{} {} за {}".format(
+                numeral.choose_plural(len(self.photos), "Скачена, Скачены, Скачены"),
+                numeral.get_plural(len(self.photos), "фотография, фотографии, фотографий"),
+                numeral.get_plural(download_time, "секунду, секунды, секунд")
+            ))
+
+            logging.info("Проверка на дубликаты")
+            dublicates_count = check_for_duplicates(group_dir)
+            logging.info(f"Дубликатов удалено: {dublicates_count}")
+
+            logging.info(f"Итого скачено: {len(self.photos) - dublicates_count} фото")
 
 
 class ChatMembersPhotoDownloader:
