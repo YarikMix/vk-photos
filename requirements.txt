@@ -6,3 +6,4 @@ pytils==0.3
 requests==2.25.1
 pytrovich==0.0.2
 PyYAML==5.4.1
+yt_dlp
